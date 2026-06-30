@@ -12,8 +12,8 @@ export function ItemCard({ item, onUpdateStatus }: ItemCardProps) {
   return (
     <div
       className={cn(
-        "bg-[#FFFCF7] rounded-2xl p-4 shadow-sm border border-[#E8DCCF] flex flex-col transition-all",
-        item.isUrgent && "border-l-[3px] border-l-[#B76558]"
+        "bg-[var(--surface)] rounded-2xl p-4 shadow-sm border border-[var(--paper-border)] flex flex-col transition-all",
+        item.isUrgent && "border-l-[3px] border-l-[var(--accent-clay)]",
       )}
     >
       <div className="flex items-start">
@@ -21,12 +21,17 @@ export function ItemCard({ item, onUpdateStatus }: ItemCardProps) {
           {item.title}
         </h4>
         {item.isUrgent && (
-          <span className="w-1.5 h-1.5 bg-[#B76558] rounded-full ml-2 mt-1.5 flex-shrink-0" />
+          <span
+            className="w-1.5 h-1.5 bg-[var(--accent-clay)] rounded-full ml-2 mt-1.5 flex-shrink-0"
+            aria-hidden
+          />
         )}
       </div>
-      
+
       {item.note && (
-        <p className="mt-1.5 text-sm text-muted-foreground line-clamp-1">{item.note}</p>
+        <p className="mt-1.5 text-sm text-muted-foreground line-clamp-1">
+          {item.note}
+        </p>
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -40,20 +45,23 @@ export function ItemCard({ item, onUpdateStatus }: ItemCardProps) {
       </div>
 
       {onUpdateStatus && (
-        <div className="mt-3 pt-3 border-t border-[#E8DCCF]/60 flex items-center gap-2">
+        <div className="mt-3 pt-3 border-t border-[var(--paper-border)]/60 flex items-center gap-2">
           <button
+            type="button"
             onClick={() => onUpdateStatus(item.id, "placed")}
             className="text-xs font-medium px-3 py-1.5 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
           >
             Place
           </button>
           <button
+            type="button"
             onClick={() => onUpdateStatus(item.id, "done")}
             className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-lg hover:bg-muted transition-colors"
           >
             Done
           </button>
           <button
+            type="button"
             onClick={() => onUpdateStatus(item.id, "later")}
             className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-lg hover:bg-muted transition-colors ml-auto"
           >

@@ -15,7 +15,10 @@ const TABS: TabType[] = ["Today", "Week", "Month", "Notes"];
 export function PlannerScreen({ items }: PlannerScreenProps) {
   const [activeTab, setActiveTab] = useState<TabType>("Today");
 
-  const getItems = (dest: string) => items.filter((i) => i.plannerDestination === dest && i.status !== "done" && i.status !== "archive");
+  const getItems = (dest: string) =>
+    items.filter(
+      (i) => i.plannerDestination === dest && i.status !== "done",
+    );
 
   const todayItems = getItems("today-page");
   const weekItems = getItems("weekly-spread");

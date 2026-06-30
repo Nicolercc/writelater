@@ -14,11 +14,3 @@ export interface CaptureItem {
   createdAt: string;
   isUrgent?: boolean;
 }
-
-export const DESTINATION_LABELS: Record<PlannerDestination, string> = {
-  "today-page": "Today's page",
-  "weekly-spread": "Weekly spread",
-  "monthly-view": "Monthly view",
-  "notes-page": "Notes page",
-  "archive": "Let go",
-};

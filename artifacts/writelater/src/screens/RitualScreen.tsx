@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { Header } from "../components/Header";
 import { RitualGroup } from "../components/RitualGroup";
 import { EmptyState } from "../components/EmptyState";
-import { CaptureItem, DESTINATION_LABELS, PlannerDestination } from "../types/planner";
+import { CaptureItem, PlannerDestination } from "../types/planner";
+import { DESTINATION_LABELS } from "../lib/placementHeuristic";
 import { Sparkles, Copy, Clock, ListChecks } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -57,7 +58,7 @@ export function RitualScreen({ items, onUpdateStatus }: RitualScreenProps) {
           />
         ) : !started ? (
           <>
-            <div className="bg-[#FFF8EF] border border-[#E8DCCF] rounded-2xl p-5">
+            <div className="bg-[var(--surface-elevated)] border border-[var(--paper-border)] rounded-2xl p-5">
               <h2 className="font-serif text-xl text-foreground">Tonight's transfer</h2>
               <div className="flex gap-4 mt-2">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -124,7 +125,7 @@ export function RitualScreen({ items, onUpdateStatus }: RitualScreenProps) {
             })}
 
             {toPlaceCount > 0 && (
-              <div className="pt-4 border-t border-[#E8DCCF]/50">
+              <div className="pt-4 border-t border-[var(--paper-border)]/50">
                 <button
                   onClick={handleCopySummary}
                   className="w-full flex items-center justify-center gap-2 bg-muted text-muted-foreground font-medium py-3.5 rounded-2xl transition-colors hover:bg-muted/80 hover:text-foreground"
