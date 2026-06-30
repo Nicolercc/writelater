@@ -1,3 +1,10 @@
 <svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="180" height="180" rx="36" fill="#FF3C00"/>
+  <rect width="180" height="180" rx="36" fill="#FFFCF7"/>
+  <rect x="18" y="18" width="144" height="144" rx="16" fill="#FFF8EF" stroke="#E8DCCF" stroke-width="2"/>
+  <path d="M52 128 L52 52 L118 52 L118 128 Z" fill="#FFF8EF" stroke="#E8DCCF" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M118 52 L118 72 L98 72 L98 52 Z" fill="#F5EFE4" stroke="#E8DCCF" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M62 78 C78 74 92 86 108 82" stroke="#D98E76" stroke-width="5" stroke-linecap="round"/>
+  <path d="M62 98 C80 94 96 106 112 100" stroke="#D98E76" stroke-width="4.5" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="128" cy="128" r="18" fill="#D98E76"/>
+  <path d="M122 134 L134 122" stroke="#FFFCF7" stroke-width="3.5" stroke-linecap="round"/>
 </svg>

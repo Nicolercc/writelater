@@ -1,10 +1,25 @@
 # WriteLater
 
-Capture ideas, process your inbox, and plan with intention.
+Capture messy thoughts on the go, then know exactly where to write them in your paper planner later.
+
+## Deploying WriteLater
+
+WriteLater is a static Vite app inside a pnpm monorepo. Deploy from the **repository root**, not from `artifacts/writelater` alone.
+
+| Setting | Value |
+|---------|--------|
+| Project root | Repository root |
+| Install | `pnpm install --frozen-lockfile` |
+| Build | `pnpm --filter @workspace/writelater run build` |
+| Output directory | `artifacts/writelater/dist/public` |
+
+Do **not** use `pnpm run build` at the repo root for a WriteLater-only deploy — that builds every workspace package.
+
+A `vercel.json` at the repo root is configured with these settings. `BASE_PATH` defaults to `/` at build time; set it only if hosting under a subpath.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/writelater run dev` — run the WriteLater frontend (requires `PORT` and `BASE_PATH`)
+- `pnpm --filter @workspace/writelater run dev` — run the WriteLater frontend (`PORT` defaults to 3000, `BASE_PATH` defaults to `/`)
 - `pnpm --filter @workspace/api-server run dev` — run the API server
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
