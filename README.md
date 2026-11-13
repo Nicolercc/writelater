@@ -4,7 +4,15 @@ Capture a thought on your phone, then move it into your paper planner or digital
 
 ## Deploying WriteLater
 
-WriteLater is a static Vite app inside a pnpm monorepo. Deploy from the **repository root**, not from `artifacts/writelater` alone.
+**Live:** https://nicolercc.github.io/writelater/
+
+Every push to `main` deploys to GitHub Pages (`.github/workflows/deploy.yml`). `main` only changes through pull requests that passed both required CI checks. The build runs with `BASE_PATH=/writelater/`, so the app, its assets, and the service worker scope all live under that path.
+
+To install it on iPhone, open the URL in Safari, tap Share, then **Add to Home Screen**. Writing stays on that device; see "WriteLater storage" below.
+
+### Vercel (alternative)
+
+`vercel.json` is ready if you'd rather host at a root URL with custom headers. Import the repo at vercel.com/new and deploy from the **repository root**:
 
 | Setting | Value |
 |---------|--------|
@@ -13,9 +21,7 @@ WriteLater is a static Vite app inside a pnpm monorepo. Deploy from the **reposi
 | Build | `pnpm --filter @workspace/writelater run build` |
 | Output directory | `artifacts/writelater/dist/public` |
 
-Do **not** use `pnpm run build` at the repo root for a WriteLater-only deploy — that builds every workspace package.
-
-A `vercel.json` at the repo root is configured with these settings. `BASE_PATH` defaults to `/` at build time; set it only if hosting under a subpath.
+Don't use `pnpm run build` at the repo root for a WriteLater-only deploy; that builds every workspace package. Each host stores data separately, because browsers keep storage per origin. Moving hosts means exporting a backup and restoring it on the new URL.
 
 ## Checks
 
