@@ -20,8 +20,8 @@ test("opens, saves, and reloads with no network after the first visit", async ({
   await expect(page.getByText("You're offline. Everything still saves on this device.")).toBeVisible();
 
   await page.getByLabel("Quick capture").fill("E2E synthetic: written on the subway");
-  await page.getByRole("button", { name: "Save to planner inbox" }).click();
-  await expect(page.getByText("Saved. It's waiting for planner time.")).toBeVisible();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saved to Unsorted.")).toBeVisible();
 
   await page.reload();
   await expect(page.getByRole("button", { name: /1 waiting/ })).toBeVisible();

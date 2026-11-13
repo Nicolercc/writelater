@@ -7,6 +7,8 @@ import { CaptureScreen } from "./CaptureScreen";
 import { useWriteLater, type WriteLaterActions } from "../hooks/useWriteLater";
 import { openWriteLaterDb } from "../storage/db";
 import { listCaptures } from "../storage/captures";
+import { loadDraft } from "../storage/draft";
+import { MAX_CAPTURE_CHARS } from "../storage/limits";
 
 const DB = "writelater";
 
@@ -40,7 +42,7 @@ async function storedTexts(): Promise<string[]> {
 }
 
 const field = () => screen.getByLabelText("Quick capture") as HTMLTextAreaElement;
-const saveButton = () => screen.getByRole("button", { name: /save to planner inbox/i });
+const saveButton = () => screen.getByRole("button", { name: "Save" });
 const status = () => screen.getByRole("status");
 
 async function typeAndWaitForReady(text: string) {
@@ -55,7 +57,7 @@ describe("CaptureScreen durable save", () => {
     const first = render(<Harness />);
     const user = await typeAndWaitForReady("SYNTHETIC A");
     await user.click(saveButton());
-    await waitFor(() => expect(status()).toHaveTextContent("Saved."));
+    await waitFor(() => expect(status()).toHaveTextContent("Saved to Unsorted."));
     first.unmount();
 
     render(<Harness />);
@@ -81,7 +83,7 @@ describe("CaptureScreen durable save", () => {
       fireEvent.click(saveButton());
       fireEvent.click(saveButton());
     });
-    await waitFor(() => expect(status()).toHaveTextContent("Saved."));
+    await waitFor(() => expect(status()).toHaveTextContent("Saved to Unsorted."));
     expect(await storedTexts()).toEqual(["SYNTHETIC C"]);
   });
 
@@ -105,7 +107,7 @@ describe("CaptureScreen durable save", () => {
     expect(field().value).toBe("SYNTHETIC D");
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(status()).toHaveTextContent("Already saved."));
+    await waitFor(() => expect(status()).toHaveTextContent("Already saved to Unsorted."));
     expect(field().value).toBe("");
     expect(await storedTexts()).toEqual(["SYNTHETIC D"]);
   });
@@ -125,14 +127,14 @@ describe("CaptureScreen durable save", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("out of storage");
     expect(field().value).toBe("SYNTHETIC Q");
-    expect(status()).not.toHaveTextContent("Saved.");
+    expect(status()).not.toHaveTextContent("Saved to Unsorted.");
     const retry = screen.getByRole("button", { name: "Retry" });
     await waitFor(() => expect(retry).toHaveFocus());
     expect(await storedTexts()).toEqual([]);
 
     fail = false;
     await user.click(retry);
-    await waitFor(() => expect(status()).toHaveTextContent("Saved."));
+    await waitFor(() => expect(status()).toHaveTextContent("Saved to Unsorted."));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(await storedTexts()).toEqual(["SYNTHETIC Q"]);
   });
@@ -141,7 +143,7 @@ describe("CaptureScreen durable save", () => {
     render(<Harness />);
     const user = await typeAndWaitForReady("SYNTHETIC E");
     await user.click(saveButton());
-    await waitFor(() => expect(status()).toHaveTextContent("Saved."));
+    await waitFor(() => expect(status()).toHaveTextContent("Saved to Unsorted."));
 
     await typeAndWaitForReady("SYNTHETIC E");
     await user.click(saveButton());
@@ -152,7 +154,7 @@ describe("CaptureScreen durable save", () => {
     render(<Harness />);
     const user = await typeAndWaitForReady("SYNTHETIC K");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
-    await waitFor(() => expect(status()).toHaveTextContent("Saved."));
+    await waitFor(() => expect(status()).toHaveTextContent("Saved to Unsorted."));
     expect(field()).toHaveFocus();
     expect(saveButton()).toBeInTheDocument();
   });
@@ -194,8 +196,53 @@ describe("CaptureScreen durable save", () => {
 
       user = await typeAndWaitForReady("SYNTHETIC second");
       await user.click(saveButton());
-      await waitFor(() => expect(status()).toHaveTextContent("Saved."));
+      await waitFor(() => expect(status()).toHaveTextContent("Saved to Unsorted."));
       expect(persist).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("keeps text typed while a save is in flight, as a new draft", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let submittedId = "";
+    render(
+      <Harness
+        wrapSave={(save) => async (input) => {
+          submittedId = input.opId;
+          await gate; // a slow device: the write hasn't committed yet
+          return save(input);
+        }}
+      />,
+    );
+    const user = await typeAndWaitForReady("SYNTHETIC first thought");
+    await user.click(saveButton());
+    // Keep typing while the save is still in flight.
+    await user.type(field(), " and a second one");
+
+    release();
+    await waitFor(() => expect(status()).toHaveTextContent("What you typed since is still here."));
+    expect(field().value).toBe("SYNTHETIC first thought and a second one");
+    expect(await storedTexts()).toEqual(["SYNTHETIC first thought"]);
+
+    // The kept text is a new draft with a new ID, so saving it adds a record.
+    const draft = loadDraft(DB);
+    expect(draft?.text).toBe("SYNTHETIC first thought and a second one");
+    expect(draft?.opId).not.toBe(submittedId);
+    await user.click(saveButton());
+    await waitFor(async () => expect(await storedTexts()).toHaveLength(2));
+    expect(field().value).toBe("");
+  });
+
+  it("explains a capture over the size limit and won't save it", async () => {
+    render(<Harness />);
+    await waitFor(() => expect(saveButton()).toBeDisabled());
+    fireEvent.change(field(), { target: { value: "x".repeat(MAX_CAPTURE_CHARS + 1) } });
+
+    expect(screen.getByText(/The limit is 100,000, so\s+split it into smaller captures\./)).toBeInTheDocument();
+    expect(field()).toHaveAttribute("aria-invalid", "true");
+    expect(saveButton()).toBeDisabled();
+
+    fireEvent.change(field(), { target: { value: "x".repeat(MAX_CAPTURE_CHARS) } });
+    await waitFor(() => expect(saveButton()).toBeEnabled());
   });
 });

@@ -116,7 +116,7 @@ export function DataPanel({
     }
     const { MAX_BACKUP_BYTES, parseBackup } = parser;
     if (file.size > MAX_BACKUP_BYTES) {
-      setRestoreError("The file is larger than 10 MB.");
+      setRestoreError("The file is larger than 100 MB.");
       return;
     }
     let text: string;
@@ -196,7 +196,7 @@ export function DataPanel({
         <div className="mt-3 rounded-xl bg-muted/40 px-3 py-2 text-sm text-foreground">
           <p>
             {storageStatus.persistence === "persisted" &&
-              "Protected: the browser won't clear WriteLater's data on its own."}
+              "Persistent storage granted: the browser won't clear WriteLater's data on its own. A backup still protects you if this device is lost or reset."}
             {storageStatus.persistence === "best-effort" &&
               "Not protected yet: the browser may clear this data if space runs low or WriteLater goes unused for a while. Adding it to your Home Screen and keeping backups helps."}
             {storageStatus.persistence === "unsupported" &&

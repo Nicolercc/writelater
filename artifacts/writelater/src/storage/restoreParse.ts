@@ -1,21 +1,22 @@
 import { z } from "zod";
 import { SCHEMA_VERSION } from "./db";
 import { BACKUP_FORMAT } from "../lib/export";
+import { MAX_BACKUP_BYTES, MAX_BACKUP_RECORDS } from "./limits";
+
+export { MAX_BACKUP_BYTES, MAX_BACKUP_RECORDS };
 
 // Backup validation lives in its own module so zod is only downloaded when
 // someone actually restores (it's loaded with a dynamic import).
 
-/** Files above this size are rejected before they are read. */
-export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
-/** Total records across all collections. */
-export const MAX_BACKUP_RECORDS = 50_000;
 
 const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "must be a date");
 const id = z.string().min(1).max(200);
 
 const captureSchema = z.object({
   id,
-  text: z.string().min(1).max(100_000),
+  // No upper bound: anything that was saved must restore, including text
+  // saved before the save-time limit existed. File size bounds the total.
+  text: z.string().min(1),
   sourceLabel: z.string().max(1_000).optional(),
   sourceRef: z.string().max(2_000).optional(),
   createdAt: isoDate,
@@ -37,7 +38,7 @@ const handoffSchema = z.object({
   id,
   captureId: id,
   destinationId: id.nullable(),
-  excerpt: z.string().max(100_000).optional(),
+  excerpt: z.string().optional(),
   state: z.enum(["pending", "deferred", "completed", "discarded"]),
   revisitOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   resolvedAt: isoDate.optional(),
@@ -78,7 +79,7 @@ function duplicateId(items: Array<{ id: string }>): string | null {
  */
 export function parseBackup(text: string): ParseResult {
   if (text.length > MAX_BACKUP_BYTES) {
-    return { ok: false, error: "The file is larger than 10 MB." };
+    return { ok: false, error: "The file is larger than 100 MB." };
   }
   let raw: unknown;
   try {

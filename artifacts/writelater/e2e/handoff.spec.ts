@@ -4,13 +4,13 @@ import { expect, test, type Page } from "@playwright/test";
 // starts empty.
 
 const captureField = (page: Page) => page.getByLabel("Quick capture");
-const saveButton = (page: Page) => page.getByRole("button", { name: "Save to planner inbox" });
+const saveButton = (page: Page) => page.getByRole("button", { name: "Save", exact: true });
 const status = (page: Page) => page.getByRole("status").filter({ hasText: /\S/ }).first();
 
 async function capture(page: Page, text: string) {
   await captureField(page).fill(text);
   await saveButton(page).click();
-  await expect(page.getByText("Saved. It's waiting for planner time.")).toBeVisible();
+  await expect(page.getByText("Saved to Unsorted.")).toBeVisible();
 }
 
 test("a capture survives reload and completes a paper handoff", async ({ page }) => {
@@ -49,7 +49,7 @@ test("a double tap on Save stores one capture", async ({ page }) => {
   await page.goto("/");
   await captureField(page).fill("E2E synthetic: tapped twice");
   await saveButton(page).dblclick();
-  await expect(page.getByText("Saved. It's waiting for planner time.")).toBeVisible();
+  await expect(page.getByText("Saved to Unsorted.")).toBeVisible();
 
   await page.reload();
   await expect(page.getByRole("button", { name: /1 waiting/ })).toBeVisible();

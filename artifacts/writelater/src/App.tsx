@@ -55,7 +55,8 @@ function useOnline(): boolean {
 function AppContent({ demo }: { demo: boolean }) {
   const online = useOnline();
   const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
-  useEffect(() => registerServiceWorker(setWaitingWorker), []);
+  const [updatedElsewhere, setUpdatedElsewhere] = useState(false);
+  useEffect(() => registerServiceWorker(setWaitingWorker, () => setUpdatedElsewhere(true)), []);
   const dbName = demo ? DEMO_DB_NAME : DEFAULT_DB_NAME;
   const [activeTab, setActiveTab] = useState<TabType>("capture");
   const { status, snapshot, actions } = useWriteLater(dbName);
@@ -72,7 +73,22 @@ function AppContent({ demo }: { demo: boolean }) {
 
   return (
     <AppShell activeTab={activeTab} onTabChange={changeTab} waitingCount={waitingCount}>
-      {waitingWorker && (
+      {updatedElsewhere && (
+        <div
+          role="alert"
+          className="mx-5 mt-4 flex items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-foreground"
+        >
+          <span className="flex-1">WriteLater was updated in another tab. Reload to keep using it. Your draft is kept.</span>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="min-h-[44px] px-3 rounded-xl bg-primary text-primary-foreground text-sm font-medium"
+          >
+            Reload
+          </button>
+        </div>
+      )}
+      {waitingWorker && !updatedElsewhere && (
         <div
           role="status"
           className="mx-5 mt-4 flex items-center gap-3 rounded-xl border border-[var(--paper-border)] bg-[var(--surface-elevated)] px-3 py-2 text-sm text-foreground"

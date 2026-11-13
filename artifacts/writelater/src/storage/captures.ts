@@ -1,4 +1,5 @@
 import type { StoredCapture, WriteLaterDb } from "./db";
+import { CaptureTooLongError, MAX_CAPTURE_CHARS } from "./limits";
 
 export interface SaveCaptureInput {
   /** Operation ID for this save intent; becomes the capture's primary key. */
@@ -31,6 +32,7 @@ export async function saveCapture(
 ): Promise<SaveCaptureResult> {
   const text = input.text.trim();
   if (!text) throw new Error("Cannot save an empty capture.");
+  if (text.length > MAX_CAPTURE_CHARS) throw new CaptureTooLongError(text.length);
 
   // Read-then-add inside one readwrite transaction. IndexedDB serializes
   // readwrite transactions on the same store, so two saves with the same ID
