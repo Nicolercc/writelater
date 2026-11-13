@@ -5,8 +5,12 @@ import { expect, type Page } from "@playwright/test";
 
 export const captureField = (page: Page) => page.getByLabel("Quick capture");
 export const saveButton = (page: Page) => page.getByRole("button", { name: "Save", exact: true });
-/** The screen's live status message (the always-mounted region that has text). */
-export const status = (page: Page) => page.getByRole("status").filter({ hasText: /\S/ }).first();
+/**
+ * The screen's live status message: the always-mounted <p role="status">
+ * that has text. App-level banners (offline, update) are also role="status",
+ * so they're excluded by element type.
+ */
+export const status = (page: Page) => page.locator('p[role="status"]').filter({ hasText: /\S/ }).first();
 
 export async function capture(page: Page, text: string) {
   await captureField(page).fill(text);
