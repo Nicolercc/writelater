@@ -3,6 +3,13 @@ import type { Snapshot } from "../../storage/handoffs";
 import { buildBackup, buildMarkdownExport } from "../../lib/export";
 import { localDate } from "../../lib/review";
 import { planRestore, type ApplyResult, type RestorePlan } from "../../storage/restore";
+import {
+  formatBytes,
+  getStorageStatus,
+  requestPersistence,
+  type PersistenceState,
+  type StorageStatus,
+} from "../../storage/persist";
 
 export type Download = (filename: string, content: string, mimeType: string) => void;
 
@@ -17,7 +24,14 @@ interface DataPanelProps {
   onErase?: () => Promise<void>;
   /** Applies a previewed restore; resolves undefined if ignored (another write in flight). */
   onRestore?: (plan: RestorePlan) => Promise<ApplyResult | undefined>;
+  /** Injectable for tests. */
+  storage?: {
+    getStatus: () => Promise<StorageStatus>;
+    request: () => Promise<PersistenceState>;
+  };
 }
+
+const realStorage = { getStatus: () => getStorageStatus(), request: () => requestPersistence() };
 
 /** Blob.text() where available; FileReader for older Safari and test DOMs. */
 function readFileText(file: File): Promise<string> {
@@ -38,7 +52,35 @@ const buttonClass =
   "min-h-[44px] px-3 rounded-xl border border-[var(--paper-border)] bg-background text-foreground text-sm text-left";
 
 /** Exports, with a plain statement of what each file contains. */
-export function DataPanel({ snapshot, download, onAnnounce, children, onErase, onRestore }: DataPanelProps) {
+export function DataPanel({
+  snapshot,
+  download,
+  onAnnounce,
+  children,
+  onErase,
+  onRestore,
+  storage = realStorage,
+}: DataPanelProps) {
+  const [storageStatus, setStorageStatus] = useState<StorageStatus | null>(null);
+  useEffect(() => {
+    let live = true;
+    storage.getStatus().then((s) => live && setStorageStatus(s)).catch(() => {});
+    return () => {
+      live = false;
+    };
+    // Re-check when the amount of data changes (usage moves with it).
+  }, [storage, snapshot]);
+
+  const askToKeep = async () => {
+    const result = await storage.request();
+    setStorageStatus(await storage.getStatus().catch(() => ({ persistence: result })));
+    onAnnounce(
+      result === "persisted"
+        ? "The browser will keep WriteLater's data."
+        : "The browser didn't agree to keep the data. Keep regular backups.",
+    );
+  };
+
   const day = localDate();
   const count = snapshot.captures.length;
   const [confirmingErase, setConfirmingErase] = useState(false);
@@ -150,6 +192,24 @@ export function DataPanel({ snapshot, download, onAnnounce, children, onErase, o
         Your writing is stored only in this browser on this device. WriteLater doesn't encrypt it,
         and clearing site data deletes it. Exports are plain text, so anyone with the file can read it.
       </p>
+      {storageStatus && (
+        <div className="mt-3 rounded-xl bg-muted/40 px-3 py-2 text-sm text-foreground">
+          <p>
+            {storageStatus.persistence === "persisted" &&
+              "Protected: the browser won't clear WriteLater's data on its own."}
+            {storageStatus.persistence === "best-effort" &&
+              "Not protected yet: the browser may clear this data if space runs low or WriteLater goes unused for a while. Adding it to your Home Screen and keeping backups helps."}
+            {storageStatus.persistence === "unsupported" &&
+              "This browser doesn't say whether it will keep this data. Keep regular backups."}
+            {storageStatus.usage !== undefined && ` Using ${formatBytes(storageStatus.usage)}.`}
+          </p>
+          {storageStatus.persistence === "best-effort" && (
+            <button type="button" onClick={askToKeep} className={`${buttonClass} mt-2`}>
+              Ask the browser to keep my data
+            </button>
+          )}
+        </div>
+      )}
       <div className="mt-3 flex flex-col gap-2">
         <button type="button" onClick={exportBackup} disabled={count === 0} className={buttonClass}>
           Download backup (JSON)
