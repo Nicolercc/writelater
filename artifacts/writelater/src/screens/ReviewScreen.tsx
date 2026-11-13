@@ -1,6 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { buildReview, addDays, confirmLabel, type QueueItem } from "../lib/review";
+import {
+  buildReview,
+  addDays,
+  captureToMarkdown,
+  confirmLabel,
+  type QueueItem,
+} from "../lib/review";
+import { copyText as defaultCopyText } from "../lib/clipboard";
+import { downloadFile } from "../lib/export";
+import { DataPanel, type Download } from "../components/review/DataPanel";
+import { UsageControls } from "../components/review/UsageControls";
 import type { Snapshot, UndoToken } from "../storage/handoffs";
 import type { StoredCapture, StoredDestination } from "../storage/db";
 import type { ActionOutcome, StoreStatus, WriteLaterActions } from "../hooks/useWriteLater";
@@ -29,6 +39,10 @@ interface ReviewScreenProps {
   /** Local date (YYYY-MM-DD); injectable for tests. */
   today: string;
   onCapture: () => void;
+  /** Injectable for tests; resolves false when copying fails. */
+  copyText?: (text: string) => Promise<boolean>;
+  /** Injectable for tests; triggers a file download. */
+  download?: Download;
 }
 
 const UNDO_MS = 8000;
@@ -43,6 +57,29 @@ const secondaryButton =
 
 function setupSkippedKey(dbName: string) {
   return `writelater:setup-skipped:${dbName}`;
+}
+
+function viewKey(dbName: string) {
+  return `writelater:review-view:${dbName}`;
+}
+
+/** The last open queue, so returning after an interruption lands in place. */
+function readView(dbName: string): View {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(viewKey(dbName)) ?? "null") as View | null;
+    if (
+      parsed &&
+      (parsed.kind === "home" ||
+        parsed.kind === "unsorted" ||
+        parsed.kind === "deferred" ||
+        (parsed.kind === "destination" && typeof parsed.id === "string"))
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Fall through to home.
+  }
+  return { kind: "home" };
 }
 
 function readFlag(key: string): boolean {
@@ -82,9 +119,29 @@ export function ReviewScreen({
   actions,
   today,
   onCapture,
+  copyText = defaultCopyText,
+  download = downloadFile,
 }: ReviewScreenProps) {
   const review = useMemo(() => buildReview(snapshot, today), [snapshot, today]);
-  const [view, setView] = useState<View>({ kind: "home" });
+  const [view, setView] = useState<View>(() => readView(dbName));
+  /** Text shown for manual copying after the clipboard refused. */
+  const [copyFallback, setCopyFallback] = useState<{ handoffId: string; text: string } | null>(null);
+  const fallbackRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(viewKey(dbName), JSON.stringify(view));
+    } catch {
+      // Not remembered; harmless.
+    }
+  }, [dbName, view]);
+
+  useEffect(() => {
+    if (copyFallback) {
+      fallbackRef.current?.focus();
+      fallbackRef.current?.select();
+    }
+  }, [copyFallback]);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,6 +186,7 @@ export function ReviewScreen({
   };
 
   const go = (next: View) => {
+    setCopyFallback(null);
     setView(next);
     setFocusTarget(HEADING_ID);
   };
@@ -295,6 +353,14 @@ export function ReviewScreen({
             <AddDestinationForm onAdd={(d) => saveDestinations([d])} />
           </div>
         )}
+        <DataPanel snapshot={snapshot} download={download} onAnnounce={(m) => announce(m)}>
+          <UsageControls
+            loadSummary={actions.usageSummary}
+            download={download}
+            onWantedOtherDevice={() => actions.logUsage("wanted_other_device")}
+            onAnnounce={(m) => announce(m)}
+          />
+        </DataPanel>
       </>
     );
   }
@@ -389,9 +455,62 @@ export function ReviewScreen({
                   {handoff.state === "deferred" && handoff.revisitOn && (
                     <p className="text-xs text-muted-foreground mt-1">Back from {formatDay(handoff.revisitOn)}</p>
                   )}
+                  {handoff.copiedAt && (
+                    <p className="text-xs text-foreground mt-2">
+                      Copied. Paste it into {destination.name}, then confirm.
+                    </p>
+                  )}
+                  {copyFallback?.handoffId === handoff.id && (
+                    <div className="mt-3">
+                      <p role="alert" className="text-sm text-foreground mb-2">
+                        Copy didn't work. The text is selected: press ⌘C, or long-press and choose Copy.
+                      </p>
+                      <label htmlFor={`fallback-${handoff.id}`} className="sr-only">
+                        Text to copy
+                      </label>
+                      <textarea
+                        id={`fallback-${handoff.id}`}
+                        ref={fallbackRef}
+                        readOnly
+                        value={copyFallback.text}
+                        rows={Math.min(6, copyFallback.text.split("\n").length + 1)}
+                        className="w-full rounded-xl border border-[var(--paper-border)] bg-background p-2 text-sm text-foreground"
+                      />
+                    </div>
+                  )}
                   <div className="mt-3 flex flex-wrap items-start gap-2">
+                    {destination.kind === "digital" && !handoff.copiedAt && (
+                      <button
+                        id={primaryId(item)}
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          const markdown = captureToMarkdown(capture);
+                          if (await copyText(markdown)) {
+                            setCopyFallback(null);
+                            // Copy alone never completes the handoff.
+                            await act(
+                              () => actions.markCopied(handoff),
+                              `Copied. Paste it into ${destination.name}, then confirm.`,
+                              // Once copied, Added becomes this item's primary control.
+                              primaryId(item),
+                            );
+                          } else {
+                            actions.logUsage("copy_failed");
+                            setCopyFallback({ handoffId: handoff.id, text: markdown });
+                          }
+                        }}
+                        className={primaryButton}
+                      >
+                        Copy Markdown
+                      </button>
+                    )}
                     <button
-                      id={primaryId(item)}
+                      id={
+                        destination.kind === "digital" && !handoff.copiedAt
+                          ? `added-${handoff.id}`
+                          : primaryId(item)
+                      }
                       type="button"
                       disabled={busy}
                       onClick={() =>
@@ -401,7 +520,9 @@ export function ReviewScreen({
                           nextId,
                         )
                       }
-                      className={primaryButton}
+                      className={
+                        destination.kind === "digital" && !handoff.copiedAt ? secondaryButton : primaryButton
+                      }
                     >
                       {confirmLabel(destination)}
                     </button>

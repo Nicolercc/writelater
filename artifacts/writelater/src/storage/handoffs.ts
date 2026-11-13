@@ -262,6 +262,22 @@ export function reactivateHandoff(
   );
 }
 
+/** Records that the text was copied. The handoff stays pending until confirmed. */
+export function markHandoffCopied(
+  db: WriteLaterDb,
+  id: string,
+  expectedRev: number,
+  now: Clock = systemClock,
+): Promise<WriteResult<HandoffWrite>> {
+  return updateHandoff(
+    db,
+    id,
+    expectedRev,
+    (current) => ({ ...current, copiedAt: now().toISOString() }),
+    now,
+  );
+}
+
 /** Moves a pending handoff to another active destination. */
 export async function moveHandoff(
   db: WriteLaterDb,
@@ -277,7 +293,7 @@ export async function moveHandoff(
     id,
     expectedRev,
     (current) => ({
-      ...omit(current, "revisitOn", "resolvedAt", "resolvedVia"),
+      ...omit(current, "revisitOn", "resolvedAt", "resolvedVia", "copiedAt"),
       destinationId,
       state: "pending",
     }),

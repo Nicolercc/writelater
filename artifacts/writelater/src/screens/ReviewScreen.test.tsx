@@ -13,11 +13,20 @@ import {
   resolveHandoff,
 } from "../storage/handoffs";
 import { addDays, localDate } from "../lib/review";
+import { listEvents } from "../storage/usage";
 
 const DB = "writelater";
 const TODAY = localDate();
 
-function Harness({ today = TODAY }: { today?: string }) {
+function Harness({
+  today = TODAY,
+  copyText,
+  download,
+}: {
+  today?: string;
+  copyText?: (text: string) => Promise<boolean>;
+  download?: (filename: string, content: string, mimeType: string) => void;
+}) {
   const { status, snapshot, actions } = useWriteLater(DB);
   return (
     <ReviewScreen
@@ -27,6 +36,8 @@ function Harness({ today = TODAY }: { today?: string }) {
       actions={actions}
       today={today}
       onCapture={() => {}}
+      copyText={copyText ?? (async () => true)}
+      download={download ?? (() => {})}
     />
   );
 }
@@ -167,9 +178,85 @@ describe("ReviewScreen", () => {
     expect(await screen.findByText("Nothing waiting for Weekly Planner.")).toBeInTheDocument();
     view.unmount();
 
+    // Reopening lands back in the same queue.
     render(<Harness today={addDays(TODAY, 1)} />);
-    await user.click(await screen.findByRole("button", { name: /Weekly Planner · This Week/ }));
     expect(await screen.findByRole("button", { name: "Written in Weekly Planner" })).toBeInTheDocument();
     expect(screen.getByText(/Back from/)).toBeInTheDocument();
+  });
+
+  it("copies Markdown without completing, then survives an interruption until Added", async () => {
+    await seed({ assigned: [["SYNTHETIC vault idea", "vault"]] });
+    const copied: string[] = [];
+    const user = userEvent.setup();
+    const first = render(<Harness copyText={async (t) => (copied.push(t), true)} />);
+    await user.click(await screen.findByRole("button", { name: /^Obsidian/ }));
+    await user.click(await screen.findByRole("button", { name: "Copy Markdown" }));
+
+    await waitFor(() => expect(statusText()).toHaveTextContent("Copied. Paste it into Obsidian"));
+    expect(copied).toEqual(["SYNTHETIC vault idea\n"]);
+    expect(screen.getByRole("button", { name: "Added to Obsidian" })).toHaveFocus();
+    expect(await handoffStates()).toEqual(["c-SYNTHETIC vault idea:pending"]);
+
+    // Interrupted: the app is closed and reopened.
+    first.unmount();
+    render(<Harness />);
+    expect(await screen.findByText(/Copied\. Paste it into Obsidian, then confirm\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy Markdown" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Added to Obsidian" }));
+    await waitFor(() => expect(statusText()).toHaveTextContent("Marked added."));
+    expect(await handoffStates()).toEqual(["c-SYNTHETIC vault idea:completed"]);
+  });
+
+  it("shows selectable text when the clipboard refuses, and never claims a copy", async () => {
+    await seed({ assigned: [["SYNTHETIC blocked copy", "vault"]] });
+    const user = userEvent.setup();
+    render(<Harness copyText={async () => false} />);
+    await user.click(await screen.findByRole("button", { name: /^Obsidian/ }));
+    await user.click(await screen.findByRole("button", { name: "Copy Markdown" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Copy didn't work");
+    const fallback = screen.getByLabelText("Text to copy") as HTMLTextAreaElement;
+    expect(fallback.value).toBe("SYNTHETIC blocked copy\n");
+    expect(fallback).toHaveFocus();
+    expect(fallback.selectionStart).toBe(0);
+    expect(fallback.selectionEnd).toBe(fallback.value.length);
+    expect(statusText()).not.toHaveTextContent("Copied");
+
+    const db = await openWriteLaterDb(DB);
+    const { handoffs } = await loadSnapshot(db);
+    db.close();
+    expect(handoffs[0].copiedAt).toBeUndefined();
+    expect(handoffs[0].state).toBe("pending");
+  });
+
+  it("exports a backup and a usage summary that holds no writing", async () => {
+    await seed({ assigned: [["SYNTHETIC private thought", "planner"]] });
+    const files: Array<{ name: string; content: string }> = [];
+    const user = userEvent.setup();
+    render(<Harness download={(name, content) => files.push({ name, content })} />);
+
+    await user.click(await screen.findByRole("button", { name: /Weekly Planner · This Week/ }));
+    await user.click(await screen.findByRole("button", { name: "Written in Weekly Planner" }));
+    await waitFor(() => expect(statusText()).toHaveTextContent("Marked written."));
+    await waitFor(async () => {
+      const db = await openWriteLaterDb(DB);
+      const types = (await listEvents(db)).map((e) => e.type);
+      db.close();
+      expect(types).toContain("handoff_confirmed_paper");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(await screen.findByRole("button", { name: /Download backup/ }));
+    await user.click(screen.getByRole("button", { name: /Download usage summary/ }));
+    await waitFor(() => expect(files).toHaveLength(2));
+
+    const [backup, usage] = files;
+    expect(backup.name).toMatch(/^writelater-backup-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(JSON.parse(backup.content)).toMatchObject({ format: "writelater-backup" });
+    expect(backup.content).toContain("SYNTHETIC private thought");
+
+    expect(JSON.parse(usage.content)).toMatchObject({ reviewDays: 1, totals: { handoff_confirmed_paper: 1 } });
+    expect(usage.content).not.toContain("SYNTHETIC");
+    expect(usage.content).not.toContain("Weekly Planner");
   });
 });

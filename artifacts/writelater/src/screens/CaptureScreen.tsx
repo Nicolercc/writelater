@@ -14,6 +14,8 @@ interface CaptureScreenProps {
   /** Unsorted plus pending handoffs. */
   waitingCount: number;
   onOpenReview: () => void;
+  /** Called when a save fails, for local usage counts. */
+  onSaveFailed?: () => void;
 }
 
 function describeSaveError(err: unknown): string {
@@ -30,6 +32,7 @@ export function CaptureScreen({
   onSave,
   waitingCount,
   onOpenReview,
+  onSaveFailed,
 }: CaptureScreenProps) {
   const [text, setText] = useState(() => loadDraft(dbName)?.text ?? "");
   // Operation ID for the current draft: created when the draft becomes
@@ -88,6 +91,7 @@ export function CaptureScreen({
       textareaRef.current?.focus();
     } catch (err) {
       setErrorMessage(describeSaveError(err));
+      onSaveFailed?.();
     } finally {
       savingRef.current = false;
       setSaving(false);

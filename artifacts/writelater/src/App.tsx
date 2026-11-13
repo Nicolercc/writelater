@@ -44,8 +44,13 @@ function AppContent({ demo }: { demo: boolean }) {
     [snapshot, today],
   );
 
+  const changeTab = (tab: TabType) => {
+    if (tab === "review" && activeTab !== "review") actions.logUsage("review_opened");
+    setActiveTab(tab);
+  };
+
   return (
-    <AppShell activeTab={activeTab} onTabChange={setActiveTab} waitingCount={waitingCount}>
+    <AppShell activeTab={activeTab} onTabChange={changeTab} waitingCount={waitingCount}>
       {demo && (
         <div
           role="note"
@@ -61,7 +66,8 @@ function AppContent({ demo }: { demo: boolean }) {
           storageStatus={status}
           onSave={actions.saveCapture}
           waitingCount={waitingCount}
-          onOpenReview={() => setActiveTab("review")}
+          onOpenReview={() => changeTab("review")}
+          onSaveFailed={() => actions.logUsage("save_failed")}
         />
       )}
       {activeTab === "review" && (
