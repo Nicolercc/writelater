@@ -1,17 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-
-// Synthetic notes only. Each test gets a fresh browser context, so storage
-// starts empty.
-
-const captureField = (page: Page) => page.getByLabel("Quick capture");
-const saveButton = (page: Page) => page.getByRole("button", { name: "Save", exact: true });
-const status = (page: Page) => page.getByRole("status").filter({ hasText: /\S/ }).first();
-
-async function capture(page: Page, text: string) {
-  await captureField(page).fill(text);
-  await saveButton(page).click();
-  await expect(page.getByText("Saved to Unsorted.")).toBeVisible();
-}
+import { expect, test } from "@playwright/test";
+import { capture, captureField, saveButton, status } from "./helpers";
 
 test("a capture survives reload and completes a paper handoff", async ({ page }) => {
   await page.goto("/");
