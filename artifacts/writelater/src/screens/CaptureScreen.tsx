@@ -20,6 +20,9 @@ interface CaptureScreenProps {
 
 function describeSaveError(err: unknown): string {
   const name = err instanceof DOMException || err instanceof Error ? err.name : "";
+  if (name === "CaptureTooLongError") {
+    return "Not saved: this is longer than 100,000 characters. Your text is still here.";
+  }
   if (name === "QuotaExceededError") {
     return "Not saved: this device is out of storage. Your text is still here.";
   }
@@ -35,6 +38,9 @@ export function CaptureScreen({
   onSaveFailed,
 }: CaptureScreenProps) {
   const [text, setText] = useState(() => loadDraft(dbName)?.text ?? "");
+  // The field stays editable during a save, so the save handler reads the
+  // latest text from here rather than from its own (older) closure.
+  const textRef = useRef(text);
   // Operation ID for the current draft: created when the draft becomes
   // non-empty, reused on every retry, retired after a committed save.
   const opIdRef = useRef<string | null>(loadDraft(dbName)?.opId ?? null);
@@ -55,6 +61,7 @@ export function CaptureScreen({
     " · Planner away mode";
 
   const handleChange = (value: string) => {
+    textRef.current = value;
     setText(value);
     setStatusMessage("");
     if (value.length === 0) {
@@ -71,6 +78,7 @@ export function CaptureScreen({
     const trimmed = text.trim();
     if (!trimmed || storageStatus !== "ready") return;
     if (!opIdRef.current) opIdRef.current = newOpId();
+    const submittedText = text;
 
     savingRef.current = true;
     setSaving(true);
@@ -79,15 +87,22 @@ export function CaptureScreen({
 
     try {
       const result = await onSave({ opId: opIdRef.current, text: trimmed });
-      // Only now, after the transaction committed, retire the draft.
-      opIdRef.current = null;
-      storeDraft(dbName, null);
-      setText("");
-      setStatusMessage(
-        result.status === "created"
-          ? "Saved. It's waiting for planner time."
-          : "Already saved. Nothing was duplicated.",
-      );
+      // The submitted text is committed, so its operation ID is retired.
+      // Clear the field only if it still holds exactly what was submitted:
+      // anything typed during the save is a new draft with a new ID.
+      const current = textRef.current;
+      const keptTyping = current !== submittedText && current.trim().length > 0;
+      if (keptTyping) {
+        opIdRef.current = newOpId();
+        storeDraft(dbName, { opId: opIdRef.current, text: current });
+      } else {
+        opIdRef.current = null;
+        storeDraft(dbName, null);
+        textRef.current = "";
+        setText("");
+      }
+      const where = result.status === "created" ? "Saved to Unsorted." : "Already saved to Unsorted. Nothing was duplicated.";
+      setStatusMessage(keptTyping ? `${where} What you typed since is still here.` : where);
       textareaRef.current?.focus();
     } catch (err) {
       setErrorMessage(describeSaveError(err));
@@ -99,6 +114,7 @@ export function CaptureScreen({
   };
 
   const handleClear = () => {
+    textRef.current = "";
     setText("");
     opIdRef.current = null;
     storeDraft(dbName, null);

@@ -1,5 +1,6 @@
 import React from "react";
 import { cn } from "@/lib/utils";
+import { MAX_CAPTURE_CHARS } from "../storage/limits";
 
 interface CaptureComposerProps {
   value: string;
@@ -31,8 +32,10 @@ export function CaptureComposer({
   textareaRef,
   retryRef,
 }: CaptureComposerProps) {
-  const hasText = value.trim().length > 0;
-  const canSave = hasText && storageReady && !saving;
+  const length = value.trim().length;
+  const hasText = length > 0;
+  const tooLong = length > MAX_CAPTURE_CHARS;
+  const canSave = hasText && !tooLong && storageReady && !saving;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -57,12 +60,19 @@ export function CaptureComposer({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Buy travel adapter before the trip…"
-          aria-describedby="capture-hint"
+          aria-describedby={tooLong ? "capture-hint capture-too-long" : "capture-hint"}
+          aria-invalid={tooLong || undefined}
           className="min-h-[120px] bg-transparent border-none outline-none resize-none text-foreground text-base leading-relaxed placeholder:text-muted-foreground/50 w-full focus:ring-2 focus:ring-primary/30 focus:ring-offset-0 rounded-md"
         />
         <p id="capture-hint" className="text-xs text-muted-foreground italic mt-2">
           Messy is fine. Sorting comes later.
         </p>
+        {tooLong && (
+          <p id="capture-too-long" className="text-sm text-foreground mt-2">
+            This is {length.toLocaleString()} characters. The limit is {MAX_CAPTURE_CHARS.toLocaleString()}, so
+            split it into smaller captures.
+          </p>
+        )}
       </div>
 
       {errorMessage && (
@@ -97,7 +107,7 @@ export function CaptureComposer({
               : "bg-primary/60 text-primary-foreground/80 opacity-50 cursor-not-allowed",
           )}
         >
-          {saving ? "Saving…" : "Save to planner inbox"}
+          {saving ? "Saving…" : "Save"}
         </button>
 
         {/* Always mounted so screen readers announce changes reliably. */}
