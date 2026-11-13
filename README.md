@@ -17,6 +17,17 @@ Do **not** use `pnpm run build` at the repo root for a WriteLater-only deploy â€
 
 A `vercel.json` at the repo root is configured with these settings. `BASE_PATH` defaults to `/` at build time; set it only if hosting under a subpath.
 
+## Checks
+
+CI (`.github/workflows/ci.yml`) runs on every pull request and on pushes to `main`. It runs, in order:
+
+1. `pnpm install --frozen-lockfile`
+2. `pnpm run typecheck`
+3. `pnpm --filter @workspace/writelater run test`
+4. `pnpm --filter @workspace/writelater run build`
+
+Run the same commands locally before pushing. Use the pinned pnpm (`corepack enable`, or `npx pnpm@10.34.9`). pnpm 11 rewrites the lockfile.
+
 ## Run & Operate
 
 - `pnpm --filter @workspace/writelater run dev` â€” run the WriteLater frontend (`PORT` defaults to 3000, `BASE_PATH` defaults to `/`)
@@ -48,7 +59,7 @@ A `vercel.json` at the repo root is configured with these settings. `BASE_PATH` 
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
+- pnpm 10 workspaces (pinned by `packageManager`), Node.js 22 (`.nvmrc`), TypeScript 5.9
 - Frontend: React 19, Vite 7, Tailwind CSS 4
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
