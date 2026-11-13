@@ -3,33 +3,31 @@ import { describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CaptureScreen } from "./CaptureScreen";
-import { useCaptures, type UseCaptures } from "../hooks/useCaptures";
+import { useWriteLater, type WriteLaterActions } from "../hooks/useWriteLater";
 import { openWriteLaterDb } from "../storage/db";
 import { listCaptures } from "../storage/captures";
-import type { CaptureItem } from "../types/planner";
 
 const DB = "writelater";
 
-type SaveFn = UseCaptures["save"];
+type SaveFn = WriteLaterActions["saveCapture"];
 
 function Harness({ wrapSave }: { wrapSave?: (save: SaveFn) => SaveFn }) {
-  const { captures, status, save } = useCaptures(DB);
-  const items: CaptureItem[] = captures.map((c) => ({
-    id: c.id,
-    title: c.text,
-    type: "note",
-    timeframe: "later",
-    plannerDestination: "notes-page",
-    status: "inbox",
-    createdAt: c.createdAt,
-  }));
+  const { snapshot, status, actions } = useWriteLater(DB);
   return (
-    <CaptureScreen
-      dbName={DB}
-      storageStatus={status}
-      onSave={wrapSave ? wrapSave(save) : save}
-      items={items}
-    />
+    <>
+      <CaptureScreen
+        dbName={DB}
+        storageStatus={status}
+        onSave={wrapSave ? wrapSave(actions.saveCapture) : actions.saveCapture}
+        waitingCount={snapshot.captures.length}
+        onOpenReview={() => {}}
+      />
+      <ul aria-label="Stored">
+        {snapshot.captures.map((c) => (
+          <li key={c.id}>{c.text}</li>
+        ))}
+      </ul>
+    </>
   );
 }
 
