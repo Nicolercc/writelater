@@ -80,6 +80,123 @@ export async function createDestinations(
   return created;
 }
 
+/** Renames a destination. Its ID stays stable, so every queue follows. */
+export async function renameDestination(
+  db: WriteLaterDb,
+  id: string,
+  expectedRev: number,
+  input: { name: string; section?: string },
+): Promise<WriteResult<StoredDestination>> {
+  const name = input.name.trim();
+  if (!name) throw new Error("A destination needs a name.");
+  const tx = db.transaction("destinations", "readwrite");
+  const current = await tx.store.get(id);
+  if (!current) {
+    await tx.done;
+    return { status: "missing" };
+  }
+  if (current.rev !== expectedRev) {
+    await tx.done;
+    return { status: "stale" };
+  }
+  const section = input.section?.trim();
+  const next: StoredDestination = {
+    ...omit(current, "section"),
+    name,
+    ...(section ? { section } : {}),
+    rev: current.rev + 1,
+  };
+  await tx.store.put(next);
+  await tx.done;
+  return { status: "ok", value: next };
+}
+
+export interface ArchiveResult {
+  destination: StoredDestination;
+  /** Waiting items moved to the other destination or back to Unsorted. */
+  moved: number;
+}
+
+/**
+ * Archives a destination and, in the same transaction, moves every waiting
+ * (pending or deferred) handoff to `reassignTo`, or back to Unsorted when
+ * `reassignTo` is null. Completed and let-go handoffs keep pointing at the
+ * archived destination as history.
+ */
+export async function archiveDestination(
+  db: WriteLaterDb,
+  id: string,
+  expectedRev: number,
+  reassignTo: string | null,
+  now: Clock = systemClock,
+): Promise<WriteResult<ArchiveResult>> {
+  if (reassignTo === id) throw new Error("Can't move items into the destination being archived.");
+  const tx = db.transaction(["destinations", "handoffs"], "readwrite");
+  const destinations = tx.objectStore("destinations");
+  const handoffs = tx.objectStore("handoffs");
+
+  const current = await destinations.get(id);
+  if (!current || current.archivedAt) {
+    await tx.done;
+    return { status: "missing" };
+  }
+  if (current.rev !== expectedRev) {
+    await tx.done;
+    return { status: "stale" };
+  }
+  if (reassignTo !== null) {
+    const target = await destinations.get(reassignTo);
+    if (!target || target.archivedAt) {
+      await tx.done;
+      return { status: "missing" };
+    }
+  }
+
+  const timestamp = now().toISOString();
+  const waiting = (await handoffs.getAll()).filter(
+    (h) => h.destinationId === id && (h.state === "pending" || h.state === "deferred"),
+  );
+  for (const handoff of waiting) {
+    if (reassignTo === null) {
+      await handoffs.delete(handoff.id);
+    } else {
+      await handoffs.put({
+        ...omit(handoff, "copiedAt"),
+        destinationId: reassignTo,
+        updatedAt: timestamp,
+        rev: handoff.rev + 1,
+      });
+    }
+  }
+
+  const archived: StoredDestination = { ...current, archivedAt: timestamp, rev: current.rev + 1 };
+  await destinations.put(archived);
+  await tx.done;
+  return { status: "ok", value: { destination: archived, moved: waiting.length } };
+}
+
+/** Makes an archived destination active again. Items moved away stay where they went. */
+export async function restoreDestination(
+  db: WriteLaterDb,
+  id: string,
+  expectedRev: number,
+): Promise<WriteResult<StoredDestination>> {
+  const tx = db.transaction("destinations", "readwrite");
+  const current = await tx.store.get(id);
+  if (!current || !current.archivedAt) {
+    await tx.done;
+    return { status: "missing" };
+  }
+  if (current.rev !== expectedRev) {
+    await tx.done;
+    return { status: "stale" };
+  }
+  const next: StoredDestination = { ...omit(current, "archivedAt"), rev: current.rev + 1 };
+  await tx.store.put(next);
+  await tx.done;
+  return { status: "ok", value: next };
+}
+
 // ---------------------------------------------------------------------------
 // Handoffs
 
