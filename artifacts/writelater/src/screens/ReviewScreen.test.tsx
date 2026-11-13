@@ -355,4 +355,62 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(statusText()).toHaveTextContent("Moved 1 item to Obsidian."));
     expect(statusText()).not.toHaveTextContent("no longer exists");
   });
+
+  it("deletes an Unsorted capture only after confirmation", async () => {
+    await seed({ unsorted: ["SYNTHETIC sensitive", "SYNTHETIC keep"] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: /Unsorted/ }));
+    const card = (await screen.findByText("SYNTHETIC sensitive")).closest("li")!;
+
+    await user.click(within(card).getByRole("button", { name: "Delete…" }));
+    await user.click(within(card).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("SYNTHETIC sensitive")).toBeInTheDocument();
+
+    await user.click(within(card).getByRole("button", { name: "Delete…" }));
+    const confirm = within(card).getByRole("button", { name: "Delete permanently" });
+    expect(confirm).toHaveFocus();
+    await user.click(confirm);
+
+    await waitFor(() => expect(statusText()).toHaveTextContent("Deleted permanently."));
+    expect(screen.queryByText("SYNTHETIC sensitive")).not.toBeInTheDocument();
+    const db = await openWriteLaterDb(DB);
+    const { captures } = await loadSnapshot(db);
+    db.close();
+    expect(captures.map((c) => c.text)).toEqual(["SYNTHETIC keep"]);
+  });
+
+  it("deletes a queued capture and its handoff from the More menu", async () => {
+    await seed({ assigned: [["SYNTHETIC queued secret", "planner"]] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: /Weekly Planner · This Week/ }));
+    await user.click(await screen.findByText("More"));
+    await user.click(screen.getByRole("button", { name: "Delete permanently…" }));
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+
+    expect(await screen.findByText("Nothing waiting for Weekly Planner.")).toBeInTheDocument();
+    expect(await handoffStates()).toEqual([]);
+  });
+
+  it("erases everything after confirmation and returns to first-run setup", async () => {
+    await seed({ assigned: [["SYNTHETIC erase me", "planner"]] });
+    localStorage.setItem("writelater:setup-skipped:writelater", "1");
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "Erase everything on this device…" }));
+
+    expect(screen.getByRole("heading", { name: "Erase everything?" })).toHaveFocus();
+    expect(screen.getByText(/permanently removes 1 capture, 2 destinations/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download a backup first" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Erase everything" }));
+
+    await waitFor(() => expect(statusText()).toHaveTextContent("Everything was erased"));
+    expect(await screen.findByRole("heading", { name: "Where does your writing go?" })).toBeInTheDocument();
+    expect(localStorage.getItem("writelater:setup-skipped:writelater")).toBeNull();
+    const db = await openWriteLaterDb(DB);
+    expect(await loadSnapshot(db)).toEqual({ captures: [], destinations: [], handoffs: [] });
+    expect(await listEvents(db)).toEqual([]);
+    db.close();
+  });
 });

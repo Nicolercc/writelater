@@ -69,8 +69,38 @@ export async function listCaptures(db: WriteLaterDb): Promise<StoredCapture[]> {
   return captures.reverse();
 }
 
-export async function deleteCapture(db: WriteLaterDb, id: string): Promise<void> {
-  const tx = db.transaction("captures", "readwrite");
-  await tx.store.delete(id);
+/**
+ * Permanently deletes a capture and every handoff that refers to it, in one
+ * transaction, so no handoff is ever left pointing at a missing capture.
+ * Returns false if the capture didn't exist.
+ */
+export async function deleteCapture(db: WriteLaterDb, id: string): Promise<boolean> {
+  const tx = db.transaction(["captures", "handoffs"], "readwrite");
+  const captures = tx.objectStore("captures");
+  const handoffs = tx.objectStore("handoffs");
+  const existing = await captures.get(id);
+  if (existing) {
+    for (const key of await handoffs.index("by_capture").getAllKeys(id)) {
+      await handoffs.delete(key);
+    }
+    await captures.delete(id);
+  }
   await tx.done;
+  return !!existing;
+}
+
+/**
+ * Permanently clears every store (captures, destinations, handoffs, usage
+ * events) in one transaction. Exported files and anything copied elsewhere
+ * are outside WriteLater and unaffected.
+ */
+export async function eraseAll(db: WriteLaterDb): Promise<void> {
+  const tx = db.transaction(["captures", "destinations", "handoffs", "events"], "readwrite");
+  await Promise.all([
+    tx.objectStore("captures").clear(),
+    tx.objectStore("destinations").clear(),
+    tx.objectStore("handoffs").clear(),
+    tx.objectStore("events").clear(),
+    tx.done,
+  ]);
 }
