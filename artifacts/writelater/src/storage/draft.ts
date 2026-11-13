@@ -51,3 +51,21 @@ export function storeDraft(dbName: string, draft: Draft | null): void {
     // only in memory, which is no worse than before.
   }
 }
+
+/**
+ * Removes every localStorage entry WriteLater keeps for one database: the
+ * draft, the last open Review queue, and the skipped-setup flag.
+ */
+export function clearLocalState(dbName: string): void {
+  try {
+    const suffix = `:${dbName}`;
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("writelater:") && k.endsWith(suffix)) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    // Storage unavailable: nothing was stored there either.
+  }
+}

@@ -67,7 +67,7 @@ describe("saveCapture", () => {
     await saveCapture(db, { opId: "old", text: "older" }, () => new Date("2026-01-01T00:00:00Z"));
     await saveCapture(db, { opId: "new", text: "newer" }, () => new Date("2026-01-02T00:00:00Z"));
     expect((await listCaptures(db)).map((c) => c.id)).toEqual(["new", "old"]);
-    await deleteCapture(db, "old");
+    expect(await deleteCapture(db, "old")).toBe(true);
     expect((await listCaptures(db)).map((c) => c.id)).toEqual(["new"]);
     db.close();
   });
