@@ -35,7 +35,12 @@ import { newOpId } from "../storage/draft";
 import { seedDemo } from "../data/demo";
 import { buildUsageSummary, listEvents, logEvent, type UsageSummary } from "../storage/usage";
 
-export type StoreStatus = "loading" | "ready" | "error" | "stale";
+/**
+ * - `blocked`: this tab is upgrading the database but an older tab still has
+ *   it open. Opening finishes (and status becomes `ready`) once that tab closes.
+ * - `stale`: a newer version opened elsewhere and this connection closed.
+ */
+export type StoreStatus = "loading" | "blocked" | "ready" | "error" | "stale";
 
 export interface SaveOutcome {
   status: "created" | "already-saved";
@@ -108,7 +113,9 @@ export function useWriteLater(dbName: string): UseWriteLater {
     setStatus("loading");
 
     const onLifecycle = (event: DbLifecycleEvent) => {
-      if (!cancelled && event === "versionchange") setStatus("stale");
+      if (cancelled) return;
+      if (event === "versionchange") setStatus("stale");
+      if (event === "blocked") setStatus((s) => (s === "loading" ? "blocked" : s));
     };
     const dbPromise = openWriteLaterDb(dbName, onLifecycle);
     dbRef.current = dbPromise;

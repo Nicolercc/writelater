@@ -148,6 +148,22 @@ export function ReviewScreen({
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // State updates land a render later, so two taps in one frame both see
+  // busy=false. The ref closes that gap; the state drives disabled styling.
+  const busyRef = useRef(false);
+
+  /** Runs one write at a time; a second call while one is in flight is ignored. */
+  const exclusive = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
+    if (busyRef.current) return undefined;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      return await fn();
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
   const [setupSkipped, setSetupSkipped] = useState(() => readFlag(setupSkippedKey(dbName)));
   const undoRegionRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<number | null>(null);
@@ -203,10 +219,9 @@ export function ReviewScreen({
     success: string,
     nextFocusId: string | null,
   ) => {
-    if (busy) return;
-    setBusy(true);
     try {
-      const outcome = await run();
+      const outcome = await exclusive(run);
+      if (!outcome) return; // A tap while another action was in flight.
       if (outcome.status === "ok") {
         announce(success, outcome.undo);
         setFocusTarget(nextFocusId ?? HEADING_ID);
@@ -217,16 +232,13 @@ export function ReviewScreen({
       }
     } catch {
       announce("Couldn't save that change. Nothing was changed. Try again.");
-    } finally {
-      setBusy(false);
     }
   };
 
   const handleUndo = async (token: UndoToken) => {
-    if (busy) return;
-    setBusy(true);
     try {
-      const outcome = await actions.undo(token);
+      const outcome = await exclusive(() => actions.undo(token));
+      if (!outcome) return;
       announce(
         outcome.status === "ok"
           ? "Undone."
@@ -234,8 +246,6 @@ export function ReviewScreen({
       );
     } catch {
       announce("Couldn't undo. Try again.");
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -493,6 +503,7 @@ export function ReviewScreen({
                         type="button"
                         disabled={busy}
                         onClick={async () => {
+                          if (busyRef.current) return;
                           const markdown = captureToMarkdown(capture);
                           if (await copyText(markdown)) {
                             setCopyFallback(null);
@@ -627,9 +638,9 @@ export function ReviewScreen({
           destinations={snapshot.destinations}
           waitingCounts={waitingCounts}
           busy={busy}
-          rename={actions.renameDestination}
-          archive={actions.archiveDestination}
-          restore={actions.restoreDestination}
+          rename={(d, input) => exclusive(() => actions.renameDestination(d, input))}
+          archive={(d, target) => exclusive(() => actions.archiveDestination(d, target))}
+          restore={(d) => exclusive(() => actions.restoreDestination(d))}
           onResult={(message, focusId) => {
             announce(message);
             setFocusTarget(focusId ?? HEADING_ID);
@@ -690,6 +701,12 @@ export function ReviewScreen({
       {status === "error" && (
         <p role="alert" className="text-sm text-foreground">
           Storage isn't available in this browser, so nothing can be reviewed here.
+        </p>
+      )}
+      {status === "blocked" && (
+        <p role="alert" className="text-sm text-foreground">
+          WriteLater is updating, but another tab still has the old version open.
+          Close other WriteLater tabs to finish.
         </p>
       )}
       {status === "stale" && (

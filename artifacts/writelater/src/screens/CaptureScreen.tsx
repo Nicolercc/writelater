@@ -135,6 +135,15 @@ export function CaptureScreen({
           Private browsing can block it.
         </div>
       )}
+      {storageStatus === "blocked" && (
+        <div
+          role="alert"
+          className="mx-5 mb-3 bg-destructive/10 border border-destructive/30 rounded-2xl px-4 py-3 text-sm text-foreground"
+        >
+          WriteLater is updating, but another tab still has the old version open.
+          Close other WriteLater tabs to finish. Your draft is kept.
+        </div>
+      )}
       {storageStatus === "stale" && (
         <div
           role="alert"

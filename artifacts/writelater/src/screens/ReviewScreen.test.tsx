@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ReviewScreen } from "./ReviewScreen";
 import { useWriteLater } from "../hooks/useWriteLater";
@@ -319,5 +319,40 @@ describe("ReviewScreen", () => {
     await user.click(screen.getByRole("button", { name: "Review" }));
     expect(await screen.findByRole("button", { name: /^Obsidian/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Unsorted/ })).toHaveTextContent("1");
+  });
+
+  it("treats a double tap on Written as one action and keeps its Undo", async () => {
+    await seed({ assigned: [["SYNTHETIC double tap", "planner"]] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: /Weekly Planner · This Week/ }));
+    const button = await screen.findByRole("button", { name: "Written in Weekly Planner" });
+
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+
+    await waitFor(() => expect(statusText()).toHaveTextContent("Marked written."));
+    expect(statusText()).not.toHaveTextContent("another tab");
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(await handoffStates()).toEqual(["c-SYNTHETIC double tap:completed"]);
+  });
+
+  it("treats a double submit of Archive as one action", async () => {
+    await seed({ assigned: [["SYNTHETIC archive twice", "planner"]] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "Manage destinations" }));
+    await user.click(await screen.findByRole("button", { name: "Archive Weekly Planner" }));
+    const submit = screen.getByRole("button", { name: "Archive Weekly Planner" });
+
+    act(() => {
+      fireEvent.click(submit);
+      fireEvent.click(submit);
+    });
+
+    await waitFor(() => expect(statusText()).toHaveTextContent("Moved 1 item to Obsidian."));
+    expect(statusText()).not.toHaveTextContent("no longer exists");
   });
 });

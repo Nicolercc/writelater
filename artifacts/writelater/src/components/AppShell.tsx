@@ -12,7 +12,7 @@ export function AppShell({ activeTab, onTabChange, waitingCount, children }: App
   return (
     <div className="min-h-[100dvh] w-full flex justify-center bg-transparent md:py-8">
       <div 
-        className="w-full max-w-[430px] bg-[var(--surface)] md:rounded-[2.5rem] overflow-hidden flex flex-col relative h-[100dvh] md:h-[850px] shadow-none"
+        className="w-full max-w-[430px] bg-[var(--surface)] md:rounded-[2.5rem] overflow-hidden flex flex-col relative h-[100dvh] md:h-[min(850px,calc(100dvh-4rem))] pt-safe md:pt-0 shadow-none"
         style={{
           boxShadow: "0 32px 80px -12px rgba(80,50,30,0.18), 0 0 0 1px rgba(200,170,140,0.25)"
         }}

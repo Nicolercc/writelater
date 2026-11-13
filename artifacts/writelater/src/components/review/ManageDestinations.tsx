@@ -7,9 +7,13 @@ interface ManageDestinationsProps {
   /** Pending plus deferred items per destination ID. */
   waitingCounts: Map<string, number>;
   busy: boolean;
-  rename: (d: StoredDestination, input: { name: string; section?: string }) => Promise<ActionOutcome>;
-  archive: (d: StoredDestination, reassignTo: string | null) => Promise<ActionOutcome & { moved?: number }>;
-  restore: (d: StoredDestination) => Promise<ActionOutcome>;
+  // Each resolves undefined when ignored because another write is in flight.
+  rename: (d: StoredDestination, input: { name: string; section?: string }) => Promise<ActionOutcome | undefined>;
+  archive: (
+    d: StoredDestination,
+    reassignTo: string | null,
+  ) => Promise<(ActionOutcome & { moved?: number }) | undefined>;
+  restore: (d: StoredDestination) => Promise<ActionOutcome | undefined>;
   /** Announces a result and optionally moves focus to an element ID. */
   onResult: (message: string, focusId?: string) => void;
 }
@@ -61,6 +65,7 @@ function DestinationCard({
     }
     try {
       const outcome = await rename(destination, { name, section });
+      if (!outcome) return;
       if (outcome.status === "ok") {
         setMode("idle");
         setError(null);
@@ -79,6 +84,7 @@ function DestinationCard({
     const reassignTo = target === UNSORTED ? null : target;
     try {
       const outcome = await archive(destination, reassignTo);
+      if (!outcome) return;
       if (outcome.status === "ok") {
         const where =
           reassignTo === null ? "Unsorted" : others.find((d) => d.id === reassignTo)?.name ?? "the other destination";
@@ -184,6 +190,7 @@ export function ManageDestinations(props: ManageDestinationsProps) {
   const doRestore = async (d: StoredDestination) => {
     try {
       const outcome = await restore(d);
+      if (!outcome) return;
       onResult(outcome.status === "ok" ? `Restored ${d.name}.` : failureMessage(outcome));
     } catch {
       onResult("Couldn't restore. Try again.");

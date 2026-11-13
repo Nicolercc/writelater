@@ -2,6 +2,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { openDB } from "idb";
 import { CaptureScreen } from "./CaptureScreen";
 import { useWriteLater, type WriteLaterActions } from "../hooks/useWriteLater";
 import { openWriteLaterDb } from "../storage/db";
@@ -154,5 +155,21 @@ describe("CaptureScreen durable save", () => {
     await waitFor(() => expect(status()).toHaveTextContent("Saved."));
     expect(field()).toHaveFocus();
     expect(saveButton()).toBeInTheDocument();
+  });
+
+  it("explains a blocked upgrade, then recovers when the old tab closes", async () => {
+    // An older tab with no upgrade handling keeps v1 open.
+    const oldTab = await openDB(DB, 1, {
+      upgrade(db) {
+        db.createObjectStore("captures", { keyPath: "id" }).createIndex("by_createdAt", "createdAt");
+      },
+    });
+    render(<Harness />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Close other WriteLater tabs");
+    expect(saveButton()).toBeDisabled();
+
+    oldTab.close();
+    await typeAndWaitForReady("SYNTHETIC after unblock");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
