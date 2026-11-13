@@ -105,7 +105,7 @@ describe("ReviewScreen", () => {
     await waitFor(() => expect(statusText()).toHaveTextContent("Sent to Weekly Planner."));
     expect(screen.queryByText("SYNTHETIC first")).not.toBeInTheDocument();
     const next = within(screen.getAllByRole("listitem")[0]).getByRole("button", { name: "Weekly Planner" });
-    expect(next).toHaveFocus();
+    await waitFor(() => expect(next).toHaveFocus());
 
     await user.click(screen.getByRole("button", { name: "Undo" }));
     await waitFor(() => expect(statusText()).toHaveTextContent("Undone."));
@@ -118,16 +118,17 @@ describe("ReviewScreen", () => {
     const user = userEvent.setup();
     render(<Harness />);
     await user.click(await screen.findByRole("button", { name: /Weekly Planner · This Week/ }));
-    expect(await screen.findByRole("heading", { name: "Weekly Planner" })).toHaveFocus();
+    await waitFor(async () => expect(await screen.findByRole("heading", { name: "Weekly Planner" })).toHaveFocus());
 
     const written = () => screen.getAllByRole("button", { name: "Written in Weekly Planner" });
     await user.click(written()[0]);
     await waitFor(() => expect(written()).toHaveLength(1));
-    expect(written()[0]).toHaveFocus();
+    // Focus moves in an effect after the list re-renders.
+    await waitFor(() => expect(written()[0]).toHaveFocus());
     await user.click(written()[0]);
 
     expect(await screen.findByText("Nothing waiting for Weekly Planner.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Weekly Planner" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Weekly Planner" })).toHaveFocus());
     expect(await handoffStates()).toEqual([
       "c-SYNTHETIC email mentor:completed",
       "c-SYNTHETIC pay invoice:completed",
@@ -195,7 +196,7 @@ describe("ReviewScreen", () => {
 
     await waitFor(() => expect(statusText()).toHaveTextContent("Copied. Paste it into Obsidian"));
     expect(copied).toEqual(["SYNTHETIC vault idea\n"]);
-    expect(screen.getByRole("button", { name: "Added to Obsidian" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Added to Obsidian" })).toHaveFocus());
     expect(await handoffStates()).toEqual(["c-SYNTHETIC vault idea:pending"]);
 
     // Interrupted: the app is closed and reopened.
@@ -218,7 +219,7 @@ describe("ReviewScreen", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Copy didn't work");
     const fallback = screen.getByLabelText("Text to copy") as HTMLTextAreaElement;
     expect(fallback.value).toBe("SYNTHETIC blocked copy\n");
-    expect(fallback).toHaveFocus();
+    await waitFor(() => expect(fallback).toHaveFocus());
     expect(fallback.selectionStart).toBe(0);
     expect(fallback.selectionEnd).toBe(fallback.value.length);
     expect(statusText()).not.toHaveTextContent("Copied");
@@ -269,13 +270,13 @@ describe("ReviewScreen", () => {
     await user.click(await screen.findByRole("button", { name: "Rename Weekly Planner" }));
 
     const name = screen.getByLabelText("Name");
-    expect(name).toHaveFocus();
+    await waitFor(() => expect(name).toHaveFocus());
     await user.clear(name);
     await user.type(name, "Hobonichi");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(statusText()).toHaveTextContent("Renamed to Hobonichi."));
-    expect(screen.getByRole("button", { name: "Rename Hobonichi" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rename Hobonichi" })).toHaveFocus());
     await user.click(screen.getByRole("button", { name: "Review" }));
     await user.click(await screen.findByRole("button", { name: /Hobonichi · This Week/ }));
     expect(await screen.findByRole("button", { name: "Written in Hobonichi" })).toBeInTheDocument();
@@ -295,7 +296,7 @@ describe("ReviewScreen", () => {
     await waitFor(() =>
       expect(statusText()).toHaveTextContent("Archived Weekly Planner. Moved 1 item to Obsidian."),
     );
-    expect(screen.getByRole("heading", { name: "Destinations" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Destinations" })).toHaveFocus());
     expect(screen.getByRole("button", { name: "Restore Weekly Planner" })).toBeInTheDocument();
 
     const db = await openWriteLaterDb(DB);
@@ -370,7 +371,7 @@ describe("ReviewScreen", () => {
 
     await user.click(within(card).getByRole("button", { name: "Delete…" }));
     const confirm = within(card).getByRole("button", { name: "Delete permanently" });
-    expect(confirm).toHaveFocus();
+    await waitFor(() => expect(confirm).toHaveFocus());
     await user.click(confirm);
 
     await waitFor(() => expect(statusText()).toHaveTextContent("Deleted permanently."));
@@ -401,7 +402,7 @@ describe("ReviewScreen", () => {
     render(<Harness />);
     await user.click(await screen.findByRole("button", { name: "Erase everything on this device…" }));
 
-    expect(screen.getByRole("heading", { name: "Erase everything?" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Erase everything?" })).toHaveFocus());
     expect(screen.getByText(/permanently removes 1 capture, 2 destinations/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download a backup first" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Erase everything" }));
@@ -434,7 +435,7 @@ describe("ReviewScreen", () => {
       new File([backup], "writelater-backup.json", { type: "application/json" }),
     );
 
-    expect(await screen.findByRole("heading", { name: "Restore preview" })).toHaveFocus();
+    await waitFor(async () => expect(await screen.findByRole("heading", { name: "Restore preview" })).toHaveFocus());
     expect(screen.getByText(/Will add 1 capture, 0 destinations, and 1 status\./)).toBeInTheDocument();
     expect(screen.getByText("Already here, skipped: 0.")).toBeInTheDocument();
     expect(screen.getByText(/Kept as they are on this device: 1/)).toHaveTextContent(
@@ -459,7 +460,7 @@ describe("ReviewScreen", () => {
       screen.getByLabelText(/Restore from backup/),
       new File(['{"not":"a backup"}'], "nope.json", { type: "application/json" }),
     );
-    expect(await screen.findByRole("heading", { name: "Can't restore this file" })).toHaveFocus();
+    await waitFor(async () => expect(await screen.findByRole("heading", { name: "Can't restore this file" })).toHaveFocus());
     expect(screen.getByRole("alert")).toHaveTextContent("isn't a WriteLater backup. Nothing was changed.");
     expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
   });
