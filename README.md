@@ -30,13 +30,18 @@ A `vercel.json` at the repo root is configured with these settings. `BASE_PATH` 
 
 ## WriteLater storage
 
-- Everything is stored on this device in IndexedDB (database `writelater`, schema version 2). Nothing is sent to a server, and WriteLater does not encrypt it.
+- Everything is stored on this device in IndexedDB (database `writelater`, schema version 3). Nothing is sent to a server, and WriteLater does not encrypt it.
   - v1: `captures`
-  - v2 adds `destinations` and `handoffs`. Migrations are additive.
+  - v2 adds `destinations` and `handoffs`.
+  - v3 adds `events`.
+  - Migrations are additive.
 - Each capture's ID is the operation ID created when the draft starts, so retrying a save never creates a duplicate. "Saved" is shown only after the write commits.
 - A capture with no handoff is **Unsorted**. Sorting it creates a handoff that is pending, deferred until a local date, completed (Written or Added), or discarded (Let go).
 - Every handoff change checks the record's revision inside one transaction and refuses stale writes from another tab. Undo is refused once the item has changed since.
 - Tabs tell each other about writes through `BroadcastChannel`.
+- For digital destinations, **Copy Markdown** copies the capture text only, with no source links. Copying never completes a handoff; you confirm with **Added**. If the clipboard is blocked, the text is shown selected for manual copying.
+- Review home offers a JSON backup (every record), a Markdown export (text grouped by destination), and a usage summary.
+- The usage log (`events`) records an event type and a time, never writing or names. The usage summary exports counts per local day only.
 - The unsaved draft is kept in `localStorage` until it is saved or cleared.
 - Open `/?demo=1` for sample destinations and items. Demo mode uses a separate `writelater-demo` database.
 

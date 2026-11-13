@@ -4,6 +4,7 @@ import {
   openWriteLaterDb,
   type DbLifecycleEvent,
   type HandoffResolution,
+  type UsageEventType,
   type StoredCapture,
   type StoredHandoff,
   type WriteLaterDb,
@@ -14,6 +15,7 @@ import {
   createDestinations,
   deferHandoff,
   loadSnapshot,
+  markHandoffCopied,
   moveHandoff,
   reactivateHandoff,
   resolveHandoff,
@@ -27,6 +29,7 @@ import {
 } from "../storage/handoffs";
 import { newOpId } from "../storage/draft";
 import { seedDemo } from "../data/demo";
+import { buildUsageSummary, listEvents, logEvent, type UsageSummary } from "../storage/usage";
 
 export type StoreStatus = "loading" | "ready" | "error" | "stale";
 
@@ -50,9 +53,14 @@ export interface WriteLaterActions {
   defer: (handoff: StoredHandoff, revisitOn: string) => Promise<ActionOutcome>;
   reactivate: (handoff: StoredHandoff) => Promise<ActionOutcome>;
   move: (handoff: StoredHandoff, destinationId: string) => Promise<ActionOutcome>;
+  /** Records a successful copy; the handoff stays pending. */
+  markCopied: (handoff: StoredHandoff) => Promise<ActionOutcome>;
   /** Sends a handoff back to Unsorted. */
   unsort: (handoff: StoredHandoff) => Promise<ActionOutcome>;
   undo: (token: UndoToken) => Promise<ActionOutcome>;
+  /** Records a usage event. Best-effort: never throws. */
+  logUsage: (type: UsageEventType) => void;
+  usageSummary: () => Promise<UsageSummary>;
 }
 
 export interface UseWriteLater {
@@ -129,15 +137,32 @@ export function useWriteLater(dbName: string): UseWriteLater {
     return fn(await dbPromise);
   }, []);
 
-  /** Runs a write, then re-reads (also after `stale`, to show the latest). */
+  /** Usage logging must never affect the user's action, so failures are ignored. */
+  const logUsage = useCallback(
+    (type: UsageEventType) => {
+      void withDb((db) => logEvent(db, type)).catch(() => {});
+    },
+    [withDb],
+  );
+
+  /**
+   * Runs a write, logs `event` if it succeeded, then re-reads (also after
+   * `stale`, to show the latest).
+   */
   const run = useCallback(
-    async (fn: (db: WriteLaterDb) => Promise<WriteResult<HandoffWrite | null>>) => {
+    async (
+      fn: (db: WriteLaterDb) => Promise<WriteResult<HandoffWrite | null>>,
+      event?: UsageEventType,
+    ) => {
       const result = await withDb(fn);
-      if (result.status === "ok") channelRef.current?.postMessage("changed");
+      if (result.status === "ok") {
+        channelRef.current?.postMessage("changed");
+        if (event) logUsage(event);
+      }
       await reload();
       return toOutcome(result);
     },
-    [withDb, reload],
+    [withDb, reload, logUsage],
   );
 
   const actions: WriteLaterActions = {
@@ -150,11 +175,12 @@ export function useWriteLater(dbName: string): UseWriteLater {
           result = await withDb((db) => saveCapture(db, { ...input, opId: newOpId() }));
         }
         if (result.status === "id-conflict") throw new Error("Could not allocate a capture ID.");
+        if (result.status === "created") logUsage("capture_saved");
         channelRef.current?.postMessage("changed");
         await reload();
         return { status: result.status, capture: result.capture };
       },
-      [withDb, reload],
+      [withDb, reload, logUsage],
     ),
     createDestinations: useCallback(
       async (inputs) => {
@@ -168,15 +194,27 @@ export function useWriteLater(dbName: string): UseWriteLater {
     ),
     assign: useCallback(
       (captureId, destinationId) =>
-        run((db) => assignCapture(db, { opId: newOpId(), captureId, destinationId })),
+        run(
+          (db) => assignCapture(db, { opId: newOpId(), captureId, destinationId }),
+          destinationId === null ? "handoff_let_go" : "handoff_sorted",
+        ),
       [run],
     ),
     resolve: useCallback(
-      (handoff, via) => run((db) => resolveHandoff(db, handoff.id, handoff.rev, via)),
+      (handoff, via) =>
+        run(
+          (db) => resolveHandoff(db, handoff.id, handoff.rev, via),
+          via === "written"
+            ? "handoff_confirmed_paper"
+            : via === "added"
+              ? "handoff_confirmed_digital"
+              : "handoff_let_go",
+        ),
       [run],
     ),
     defer: useCallback(
-      (handoff, revisitOn) => run((db) => deferHandoff(db, handoff.id, handoff.rev, revisitOn)),
+      (handoff, revisitOn) =>
+        run((db) => deferHandoff(db, handoff.id, handoff.rev, revisitOn), "handoff_deferred"),
       [run],
     ),
     reactivate: useCallback(
@@ -188,11 +226,20 @@ export function useWriteLater(dbName: string): UseWriteLater {
         run((db) => moveHandoff(db, handoff.id, handoff.rev, destinationId)),
       [run],
     ),
+    markCopied: useCallback(
+      (handoff) => run((db) => markHandoffCopied(db, handoff.id, handoff.rev), "copy_succeeded"),
+      [run],
+    ),
     unsort: useCallback(
       (handoff) => run((db) => unsortHandoff(db, handoff.id, handoff.rev)),
       [run],
     ),
-    undo: useCallback((token) => run((db) => undoHandoffWrite(db, token)), [run]),
+    undo: useCallback((token) => run((db) => undoHandoffWrite(db, token), "undo"), [run]),
+    logUsage,
+    usageSummary: useCallback(
+      async () => buildUsageSummary(await withDb((db) => listEvents(db))),
+      [withDb],
+    ),
   };
 
   return { status, snapshot, actions };
