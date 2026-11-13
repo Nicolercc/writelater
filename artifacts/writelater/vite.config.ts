@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { serviceWorkerPlugin } from "./sw/plugin";
 
 const basePath = process.env.BASE_PATH || "/";
 
@@ -14,7 +15,7 @@ if (rawPort && (Number.isNaN(port) || port <= 0)) {
 
 export default defineConfig({
   base: basePath,
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), serviceWorkerPlugin({ root: import.meta.dirname })],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),

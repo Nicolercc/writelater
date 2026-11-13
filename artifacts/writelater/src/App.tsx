@@ -11,6 +11,7 @@ import { ReviewScreen } from "./screens/ReviewScreen";
 import { useWriteLater } from "./hooks/useWriteLater";
 import { buildReview, localDate } from "./lib/review";
 import { DEFAULT_DB_NAME, DEMO_DB_NAME } from "./storage/db";
+import { applyUpdate, registerServiceWorker } from "./lib/serviceWorker";
 
 function isDemoMode(): boolean {
   try {
@@ -35,7 +36,26 @@ function useToday(): string {
   return today;
 }
 
+/** Tracks connectivity so the app can say that saving still works offline. */
+function useOnline(): boolean {
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+  return online;
+}
+
 function AppContent({ demo }: { demo: boolean }) {
+  const online = useOnline();
+  const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
+  useEffect(() => registerServiceWorker(setWaitingWorker), []);
   const dbName = demo ? DEMO_DB_NAME : DEFAULT_DB_NAME;
   const [activeTab, setActiveTab] = useState<TabType>("capture");
   const { status, snapshot, actions } = useWriteLater(dbName);
@@ -52,6 +72,29 @@ function AppContent({ demo }: { demo: boolean }) {
 
   return (
     <AppShell activeTab={activeTab} onTabChange={changeTab} waitingCount={waitingCount}>
+      {waitingWorker && (
+        <div
+          role="status"
+          className="mx-5 mt-4 flex items-center gap-3 rounded-xl border border-[var(--paper-border)] bg-[var(--surface-elevated)] px-3 py-2 text-sm text-foreground"
+        >
+          <span className="flex-1">A new version of WriteLater is ready.</span>
+          <button
+            type="button"
+            onClick={() => applyUpdate(waitingWorker)}
+            className="min-h-[44px] px-3 rounded-xl bg-primary text-primary-foreground text-sm font-medium"
+          >
+            Reload to update
+          </button>
+        </div>
+      )}
+      {!online && (
+        <div
+          role="status"
+          className="mx-5 mt-4 rounded-xl border border-[var(--paper-border)] bg-[var(--surface-elevated)] px-3 py-2 text-sm text-foreground"
+        >
+          You're offline. Everything still saves on this device.
+        </div>
+      )}
       {demo && (
         <div
           role="note"
