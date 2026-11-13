@@ -1,6 +1,4 @@
-import React, { useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
+import React, { useMemo, useState } from "react";
 import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
@@ -12,36 +10,74 @@ import { InboxScreen } from "./screens/InboxScreen";
 import { RitualScreen } from "./screens/RitualScreen";
 import { PlannerScreen } from "./screens/PlannerScreen";
 
-import { mockItems } from "./data/mockItems";
+import { demoItems } from "./data/mockItems";
 import { CaptureItem, ItemStatus } from "./types/planner";
+import { useCaptures } from "./hooks/useCaptures";
+import { DEFAULT_DB_NAME, DEMO_DB_NAME, type StoredCapture } from "./storage/db";
 
-const queryClient = new QueryClient();
+function isDemoMode(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("demo") === "1";
+  } catch {
+    return false;
+  }
+}
 
-function AppContent() {
-  const [activeTab, setActiveTab] = useState<TabType>("capture");
-  const [items, setItems] = useState<CaptureItem[]>(mockItems);
-
-  const handleSaveItem = (itemData: Omit<CaptureItem, "id" | "createdAt" | "status">) => {
-    const newItem: CaptureItem = {
-      ...itemData,
-      id: Math.random().toString(36).substr(2, 9),
-      createdAt: new Date().toISOString(),
-      status: "inbox",
-    };
-    setItems((prev) => [newItem, ...prev]);
-    // Optional: Switch to inbox immediately after capture
-    // setActiveTab("inbox"); 
+/**
+ * Bridges stored captures to the prototype's view model until the Review
+ * screen is rebuilt on destinations and handoffs.
+ */
+function toCaptureItem(capture: StoredCapture): CaptureItem {
+  return {
+    id: capture.id,
+    title: capture.text,
+    type: "note",
+    timeframe: "later",
+    plannerDestination: "notes-page",
+    status: "inbox",
+    createdAt: capture.createdAt,
   };
+}
 
-  const handleUpdateStatus = (id: string, status: ItemStatus) => {
-    setItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status } : item))
+function AppContent({ demo }: { demo: boolean }) {
+  const dbName = demo ? DEMO_DB_NAME : DEFAULT_DB_NAME;
+  const [activeTab, setActiveTab] = useState<TabType>("capture");
+  const { captures, status, save } = useCaptures(dbName);
+  // Review status changes are still in memory; they move to IndexedDB with
+  // handoffs in the next change.
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, ItemStatus>>({});
+
+  const items = useMemo(() => {
+    const stored = captures.map(toCaptureItem);
+    const all = demo ? [...stored, ...demoItems] : stored;
+    return all.map((item) =>
+      statusOverrides[item.id] ? { ...item, status: statusOverrides[item.id] } : item,
     );
+  }, [captures, demo, statusOverrides]);
+
+  const handleUpdateStatus = (id: string, next: ItemStatus) => {
+    setStatusOverrides((prev) => ({ ...prev, [id]: next }));
   };
 
   return (
     <AppShell activeTab={activeTab} onTabChange={setActiveTab}>
-      {activeTab === "capture" && <CaptureScreen onSave={handleSaveItem} items={items} />}
+      {demo && (
+        <div
+          role="note"
+          className="mx-5 mt-4 rounded-xl border border-[var(--paper-border)] bg-[var(--surface-elevated)] px-3 py-2 text-xs text-foreground"
+        >
+          Demo mode: sample items, saved separately from your real captures.
+        </div>
+      )}
+      {activeTab === "capture" && (
+        <CaptureScreen
+          key={dbName}
+          dbName={dbName}
+          storageStatus={status}
+          onSave={save}
+          items={items}
+        />
+      )}
       {activeTab === "inbox" && <InboxScreen items={items} onUpdateStatus={handleUpdateStatus} />}
       {activeTab === "ritual" && <RitualScreen items={items} onUpdateStatus={handleUpdateStatus} />}
       {activeTab === "planner" && <PlannerScreen items={items} />}
@@ -50,14 +86,12 @@ function AppContent() {
 }
 
 function App() {
+  const demo = useMemo(isDemoMode, []);
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <AppContent />
-        <Toaster />
-        <SonnerToaster />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <TooltipProvider>
+      <AppContent demo={demo} />
+      <SonnerToaster />
+    </TooltipProvider>
   );
 }
 
