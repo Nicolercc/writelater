@@ -14,6 +14,7 @@ import {
 } from "../storage/handoffs";
 import { addDays, localDate } from "../lib/review";
 import { listEvents } from "../storage/usage";
+import { buildBackup } from "../lib/export";
 
 const DB = "writelater";
 const TODAY = localDate();
@@ -412,5 +413,54 @@ describe("ReviewScreen", () => {
     expect(await loadSnapshot(db)).toEqual({ captures: [], destinations: [], handoffs: [] });
     expect(await listEvents(db)).toEqual([]);
     db.close();
+  });
+
+  it("previews a restore, then adds only what's missing", async () => {
+    // A backup made on another device: one destination, one capture, sorted.
+    const other = await openWriteLaterDb("other-device");
+    // Same ID as this device's planner but a different section, so it's a conflict.
+    await createDestinations(other, [{ id: "planner", name: "Weekly Planner", kind: "paper", section: "Next Week" }]);
+    await saveCapture(other, { opId: "restored", text: "SYNTHETIC from backup" });
+    await assignCapture(other, { opId: "restored-h", captureId: "restored", destinationId: "planner" });
+    const backup = JSON.stringify(buildBackup(await loadSnapshot(other)));
+    other.close();
+
+    await seed({ unsorted: ["SYNTHETIC already here"] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByRole("button", { name: /Unsorted/ });
+    await user.upload(
+      screen.getByLabelText(/Restore from backup/),
+      new File([backup], "writelater-backup.json", { type: "application/json" }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Restore preview" })).toHaveFocus();
+    expect(screen.getByText(/Will add 1 capture, 0 destinations, and 1 status\./)).toBeInTheDocument();
+    expect(screen.getByText("Already here, skipped: 0.")).toBeInTheDocument();
+    expect(screen.getByText(/Kept as they are on this device: 1/)).toHaveTextContent(
+      "a destination: differs from the copy on this device",
+    );
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+
+    await waitFor(() => expect(statusText()).toHaveTextContent("Restored 2 records."));
+    expect(await handoffStates()).toEqual(["restored:pending"]);
+    const db = await openWriteLaterDb(DB);
+    const { captures } = await loadSnapshot(db);
+    db.close();
+    expect(captures.map((c) => c.text).sort()).toEqual(["SYNTHETIC already here", "SYNTHETIC from backup"]);
+  });
+
+  it("explains an invalid backup and changes nothing", async () => {
+    await seed({ unsorted: ["SYNTHETIC untouched"] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await screen.findByRole("button", { name: /Unsorted/ });
+    await user.upload(
+      screen.getByLabelText(/Restore from backup/),
+      new File(['{"not":"a backup"}'], "nope.json", { type: "application/json" }),
+    );
+    expect(await screen.findByRole("heading", { name: "Can't restore this file" })).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("isn't a WriteLater backup. Nothing was changed.");
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
   });
 });
