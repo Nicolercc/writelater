@@ -80,4 +80,13 @@ describe("saveCapture", () => {
     real.close();
     demo.close();
   });
+
+  it("enforces the shared length limit at save time", async () => {
+    const { MAX_CAPTURE_CHARS } = await import("./limits");
+    const db = await openWriteLaterDb("test");
+    await expect(saveCapture(db, { opId: "long", text: "x".repeat(MAX_CAPTURE_CHARS + 1) })).rejects.toThrow(/limit/);
+    expect((await saveCapture(db, { opId: "max", text: "x".repeat(MAX_CAPTURE_CHARS) })).status).toBe("created");
+    expect(await listCaptures(db)).toHaveLength(1);
+    db.close();
+  });
 });

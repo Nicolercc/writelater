@@ -116,7 +116,7 @@ export function DataPanel({
     }
     const { MAX_BACKUP_BYTES, parseBackup } = parser;
     if (file.size > MAX_BACKUP_BYTES) {
-      setRestoreError("The file is larger than 10 MB.");
+      setRestoreError("The file is larger than 100 MB.");
       return;
     }
     let text: string;

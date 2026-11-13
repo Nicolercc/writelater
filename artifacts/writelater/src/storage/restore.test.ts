@@ -149,3 +149,36 @@ describe("planRestore and applyRestore", () => {
     target.close();
   });
 });
+
+describe("every saved capture is restorable", () => {
+  it("round-trips a capture at the save limit through export and restore", async () => {
+    const { MAX_CAPTURE_CHARS } = await import("./limits");
+    const source = await openWriteLaterDb("limit-src");
+    await saveCapture(source, { opId: "big", text: "x".repeat(MAX_CAPTURE_CHARS) });
+    const text = await backupText(source);
+
+    const result = parseBackup(text);
+    expect(result.ok).toBe(true);
+    const target = await openWriteLaterDb("limit-dst");
+    const plan = planRestore(await loadSnapshot(target), parsed(text));
+    expect(await applyRestore(target, plan)).toEqual({ status: "ok", added: 1 });
+    expect((await loadSnapshot(target)).captures[0].text).toHaveLength(MAX_CAPTURE_CHARS);
+    source.close();
+    target.close();
+  });
+
+  it("restores text saved before the limit existed", async () => {
+    const { MAX_CAPTURE_CHARS } = await import("./limits");
+    const source = await openWriteLaterDb("legacy-src");
+    // Written directly, as an older build without the limit could have.
+    const at = new Date().toISOString();
+    await source.put("captures", { id: "legacy", text: "y".repeat(MAX_CAPTURE_CHARS + 5_000), createdAt: at, updatedAt: at, rev: 1 });
+    const text = await backupText(source);
+
+    expect(parseBackup(text).ok).toBe(true);
+    const target = await openWriteLaterDb("legacy-dst");
+    expect(await applyRestore(target, planRestore(await loadSnapshot(target), parsed(text)))).toEqual({ status: "ok", added: 1 });
+    source.close();
+    target.close();
+  });
+});
