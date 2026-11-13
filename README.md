@@ -26,6 +26,10 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and on pushes to `mai
 3. `pnpm --filter @workspace/writelater run test`
 4. `pnpm --filter @workspace/writelater run build`
 
+A second job runs the end-to-end tests (`pnpm --filter @workspace/writelater run test:e2e`). They build for production, serve the build with `vite preview`, and run Playwright in **Chromium** and **WebKit with iPhone 15 emulation** (WebKit is Safari's engine). The offline test is Chromium-only, because Playwright exposes service workers only there.
+
+Locally, install the browsers once with `pnpm --filter @workspace/writelater exec playwright install chromium webkit`. On macOS 14, Playwright 1.64 only offers a frozen WebKit build that this version can't drive, so run `--project=chromium` locally and rely on CI for WebKit.
+
 Run the same commands locally before pushing. Use the pinned pnpm (`corepack enable`, or `npx pnpm@10.34.9`). pnpm 11 rewrites the lockfile.
 
 ## Run & Operate
