@@ -1,19 +1,19 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { CaptureItem } from "../types/planner";
+import { ChevronRight } from "lucide-react";
 import { CaptureComposer } from "../components/CaptureComposer";
-import { PlannerInboxSummary } from "../components/PlannerInboxSummary";
-import { RecentCaptureCard } from "../components/RecentCaptureCard";
 import { loadDraft, newOpId, storeDraft } from "../storage/draft";
 import type { SaveCaptureInput } from "../storage/captures";
-import type { CapturesStatus, SaveOutcome } from "../hooks/useCaptures";
+import type { StoreStatus, SaveOutcome } from "../hooks/useWriteLater";
 
 interface CaptureScreenProps {
   /** Database the draft belongs to, so demo and real drafts never mix. */
   dbName: string;
-  storageStatus: CapturesStatus;
+  storageStatus: StoreStatus;
   onSave: (input: SaveCaptureInput) => Promise<SaveOutcome>;
-  items: CaptureItem[];
+  /** Unsorted plus pending handoffs. */
+  waitingCount: number;
+  onOpenReview: () => void;
 }
 
 function describeSaveError(err: unknown): string {
@@ -28,7 +28,8 @@ export function CaptureScreen({
   dbName,
   storageStatus,
   onSave,
-  items,
+  waitingCount,
+  onOpenReview,
 }: CaptureScreenProps) {
   const [text, setText] = useState(() => loadDraft(dbName)?.text ?? "");
   // Operation ID for the current draft: created when the draft becomes
@@ -49,8 +50,6 @@ export function CaptureScreen({
   const dateLine =
     new Date().toLocaleDateString("en-US", { weekday: "long" }) +
     " · Planner away mode";
-
-  const recentItems = items.filter((i) => i.status === "inbox").slice(0, 3);
 
   const handleChange = (value: string) => {
     setText(value);
@@ -165,20 +164,18 @@ export function CaptureScreen({
         retryRef={retryRef}
       />
 
-      <div className="mx-5 mt-5">
-        <PlannerInboxSummary items={items} />
-      </div>
-
-      {recentItems.length > 0 && (
-        <div className="mx-5 mt-5 mb-4">
-          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
-            Recently captured
-          </div>
-          <div className="space-y-2">
-            {recentItems.map((item) => (
-              <RecentCaptureCard key={item.id} item={item} />
-            ))}
-          </div>
+      {storageStatus === "ready" && (
+        <div className="mx-5 mt-4">
+          <button
+            type="button"
+            onClick={onOpenReview}
+            className="w-full flex items-center justify-between min-h-[44px] px-4 rounded-xl bg-[var(--surface-elevated)] border border-[var(--paper-border)] text-sm text-foreground"
+          >
+            <span>{waitingCount} waiting</span>
+            <span className="inline-flex items-center gap-1 font-medium">
+              Review <ChevronRight className="w-4 h-4" aria-hidden />
+            </span>
+          </button>
         </div>
       )}
     </motion.div>

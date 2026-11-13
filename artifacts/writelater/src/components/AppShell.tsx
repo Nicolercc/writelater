@@ -4,10 +4,11 @@ import { BottomNav, TabType } from "./BottomNav";
 interface AppShellProps {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
+  waitingCount: number;
   children: React.ReactNode;
 }
 
-export function AppShell({ activeTab, onTabChange, children }: AppShellProps) {
+export function AppShell({ activeTab, onTabChange, waitingCount, children }: AppShellProps) {
   return (
     <div className="min-h-[100dvh] w-full flex justify-center bg-transparent md:py-8">
       <div 
@@ -24,7 +25,7 @@ export function AppShell({ activeTab, onTabChange, children }: AppShellProps) {
         
         {/* Bottom Navigation */}
         <div className="mt-auto relative z-10">
-          <BottomNav activeTab={activeTab} onTabChange={onTabChange} />
+          <BottomNav activeTab={activeTab} onTabChange={onTabChange} waitingCount={waitingCount} />
         </div>
       </div>
     </div>
