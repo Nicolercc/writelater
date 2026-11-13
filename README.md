@@ -20,12 +20,21 @@ A `vercel.json` at the repo root is configured with these settings. `BASE_PATH` 
 ## Run & Operate
 
 - `pnpm --filter @workspace/writelater run dev` — run the WriteLater frontend (`PORT` defaults to 3000, `BASE_PATH` defaults to `/`)
+- `pnpm --filter @workspace/writelater run test` — run WriteLater unit and component tests (Vitest, jsdom, fake-indexeddb)
 - `pnpm --filter @workspace/api-server run dev` — run the API server
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+
+## WriteLater storage
+
+- Captures are stored on this device in IndexedDB (database `writelater`, schema version 1). Nothing is sent to a server, and WriteLater does not encrypt it.
+- Each capture's ID is the operation ID created when the draft starts, so retrying a save never creates a duplicate. "Saved" is shown only after the write commits.
+- The unsaved draft is kept in `localStorage` until it is saved or cleared.
+- Open `/?demo=1` for sample items. Demo mode uses a separate `writelater-demo` database.
+- Review status changes (Place, Done, Can wait) are not persisted yet.
 
 ## Stack
 

@@ -1,23 +1,50 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { CaptureItem, ItemType, Timeframe } from "../types/planner";
-import { getSuggestedPlacement } from "../lib/placementHeuristic";
+import { CaptureItem } from "../types/planner";
 import { CaptureComposer } from "../components/CaptureComposer";
 import { PlannerInboxSummary } from "../components/PlannerInboxSummary";
 import { RecentCaptureCard } from "../components/RecentCaptureCard";
+import { loadDraft, newOpId, storeDraft } from "../storage/draft";
+import type { SaveCaptureInput } from "../storage/captures";
+import type { CapturesStatus, SaveOutcome } from "../hooks/useCaptures";
 
 interface CaptureScreenProps {
-  onSave: (item: Omit<CaptureItem, "id" | "createdAt" | "status">) => void;
+  /** Database the draft belongs to, so demo and real drafts never mix. */
+  dbName: string;
+  storageStatus: CapturesStatus;
+  onSave: (input: SaveCaptureInput) => Promise<SaveOutcome>;
   items: CaptureItem[];
 }
 
-export function CaptureScreen({ onSave, items }: CaptureScreenProps) {
-  const [title, setTitle] = useState("");
-  const [selectedType, setSelectedType] = useState<ItemType | null>(null);
-  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe | null>(
-    null,
-  );
-  const [confirmation, setConfirmation] = useState<string | undefined>();
+function describeSaveError(err: unknown): string {
+  const name = err instanceof DOMException || err instanceof Error ? err.name : "";
+  if (name === "QuotaExceededError") {
+    return "Not saved: this device is out of storage. Your text is still here.";
+  }
+  return "Not saved. Your text is still here.";
+}
+
+export function CaptureScreen({
+  dbName,
+  storageStatus,
+  onSave,
+  items,
+}: CaptureScreenProps) {
+  const [text, setText] = useState(() => loadDraft(dbName)?.text ?? "");
+  // Operation ID for the current draft: created when the draft becomes
+  // non-empty, reused on every retry, retired after a committed save.
+  const opIdRef = useRef<string | null>(loadDraft(dbName)?.opId ?? null);
+  // Ref guard so two taps in the same frame can't both start a save.
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (errorMessage) retryRef.current?.focus();
+  }, [errorMessage]);
 
   const dateLine =
     new Date().toLocaleDateString("en-US", { weekday: "long" }) +
@@ -25,36 +52,56 @@ export function CaptureScreen({ onSave, items }: CaptureScreenProps) {
 
   const recentItems = items.filter((i) => i.status === "inbox").slice(0, 3);
 
-  const handleSave = () => {
-    if (!title.trim()) return;
+  const handleChange = (value: string) => {
+    setText(value);
+    setStatusMessage("");
+    if (value.length === 0) {
+      opIdRef.current = null;
+      storeDraft(dbName, null);
+      return;
+    }
+    if (!opIdRef.current) opIdRef.current = newOpId();
+    storeDraft(dbName, { opId: opIdRef.current, text: value });
+  };
 
-    const type = selectedType ?? "note";
-    const timeframe = selectedTimeframe ?? "later";
-    const { destination } = getSuggestedPlacement({
-      type: selectedType,
-      timeframe: selectedTimeframe,
-      title,
-    });
+  const handleSave = async () => {
+    if (savingRef.current) return;
+    const trimmed = text.trim();
+    if (!trimmed || storageStatus !== "ready") return;
+    if (!opIdRef.current) opIdRef.current = newOpId();
 
-    onSave({
-      title: title.trim(),
-      type,
-      timeframe,
-      plannerDestination: destination,
-    });
+    savingRef.current = true;
+    setSaving(true);
+    setErrorMessage(null);
+    setStatusMessage("");
 
-    setTitle("");
-    setSelectedType(null);
-    setSelectedTimeframe(null);
-    setConfirmation("Saved. It's waiting for planner time.");
-    setTimeout(() => setConfirmation(undefined), 2000);
+    try {
+      const result = await onSave({ opId: opIdRef.current, text: trimmed });
+      // Only now, after the transaction committed, retire the draft.
+      opIdRef.current = null;
+      storeDraft(dbName, null);
+      setText("");
+      setStatusMessage(
+        result.status === "created"
+          ? "Saved. It's waiting for planner time."
+          : "Already saved. Nothing was duplicated.",
+      );
+      textareaRef.current?.focus();
+    } catch (err) {
+      setErrorMessage(describeSaveError(err));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const handleClear = () => {
-    setTitle("");
-    setSelectedType(null);
-    setSelectedTimeframe(null);
-    setConfirmation(undefined);
+    setText("");
+    opIdRef.current = null;
+    storeDraft(dbName, null);
+    setErrorMessage(null);
+    setStatusMessage("");
+    textareaRef.current?.focus();
   };
 
   return (
@@ -64,7 +111,6 @@ export function CaptureScreen({ onSave, items }: CaptureScreenProps) {
       transition={{ duration: 0.2 }}
       className="pb-24"
     >
-      {/* A. Header */}
       <div className="px-5 pt-5 pb-2">
         <div className="text-xs text-muted-foreground tracking-wide mb-2">
           {dateLine}
@@ -77,25 +123,52 @@ export function CaptureScreen({ onSave, items }: CaptureScreenProps) {
         </p>
       </div>
 
-      {/* B. Capture composer (capture → chips → placement → CTA) */}
+      {storageStatus === "error" && (
+        <div
+          role="alert"
+          className="mx-5 mb-3 bg-destructive/10 border border-destructive/30 rounded-2xl px-4 py-3 text-sm text-foreground"
+        >
+          Storage isn't available in this browser, so captures can't be saved.
+          Private browsing can block it.
+        </div>
+      )}
+      {storageStatus === "stale" && (
+        <div
+          role="alert"
+          className="mx-5 mb-3 bg-destructive/10 border border-destructive/30 rounded-2xl px-4 py-3 flex items-center gap-3"
+        >
+          <span className="text-sm text-foreground flex-1">
+            WriteLater was updated in another tab. Reload to keep saving. Your
+            draft is kept.
+          </span>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="text-sm font-medium px-3 py-2 min-h-[44px] rounded-lg bg-background border border-[var(--paper-border)] text-foreground"
+          >
+            Reload
+          </button>
+        </div>
+      )}
+
       <CaptureComposer
-        title={title}
-        selectedType={selectedType}
-        selectedTimeframe={selectedTimeframe}
-        onTitleChange={setTitle}
-        onTypeSelect={setSelectedType}
-        onTimeframeSelect={setSelectedTimeframe}
+        value={text}
+        onChange={handleChange}
         onSave={handleSave}
         onClear={handleClear}
-        confirmation={confirmation}
+        onRetry={handleSave}
+        storageReady={storageStatus === "ready"}
+        saving={saving}
+        statusMessage={statusMessage}
+        errorMessage={errorMessage}
+        textareaRef={textareaRef}
+        retryRef={retryRef}
       />
 
-      {/* C. Planner inbox summary — below CTA */}
       <div className="mx-5 mt-5">
         <PlannerInboxSummary items={items} />
       </div>
 
-      {/* D. Recently captured */}
       {recentItems.length > 0 && (
         <div className="mx-5 mt-5 mb-4">
           <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">
