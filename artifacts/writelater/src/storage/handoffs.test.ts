@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { openWriteLaterDb, type WriteLaterDb } from "./db";
+import { openWriteLaterDb, SCHEMA_VERSION, type WriteLaterDb } from "./db";
 import { listCaptures, saveCapture } from "./captures";
 import {
   assignCapture,
@@ -37,13 +37,13 @@ async function assign(db: WriteLaterDb, captureId: string, destinationId: string
 }
 
 describe("schema upgrade", () => {
-  it("keeps v1 captures when opening as v2", async () => {
+  it("keeps v1 captures when opening the current version", async () => {
     const v1 = await openWriteLaterDb("upgrade", undefined, 1);
     await saveCapture(v1, { opId: "old", text: "SYNTHETIC from v1" });
     v1.close();
 
     const v2 = await openWriteLaterDb("upgrade");
-    expect(v2.version).toBe(2);
+    expect(v2.version).toBe(SCHEMA_VERSION);
     expect((await listCaptures(v2)).map((c) => c.text)).toEqual(["SYNTHETIC from v1"]);
     const snapshot = await loadSnapshot(v2);
     expect(snapshot.destinations).toEqual([]);
@@ -56,7 +56,7 @@ describe("schema upgrade", () => {
     const old = await openWriteLaterDb("tabs", (e) => events.push(e), 1);
     const newer = await openWriteLaterDb("tabs");
     expect(events).toEqual(["versionchange"]);
-    expect(newer.version).toBe(2);
+    expect(newer.version).toBe(SCHEMA_VERSION);
     old.close();
     newer.close();
   });

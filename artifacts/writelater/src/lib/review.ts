@@ -83,9 +83,11 @@ export function buildReview(snapshot: Snapshot, today: string): Review {
       const mine = items.filter((i) => i.handoff.destinationId === destination.id);
       return {
         destination,
+        // Copied-but-unconfirmed items first, so an interrupted handoff is
+        // the first thing you see when you come back.
         pending: mine
           .filter((i) => i.handoff.state === "pending" || isDue(i.handoff, today))
-          .sort(byCreated),
+          .sort((a, b) => Number(!!b.handoff.copiedAt) - Number(!!a.handoff.copiedAt) || byCreated(a, b)),
         doneToday: mine.filter((i) => resolvedOn(i.handoff, today)).sort(byResolvedDesc),
       };
     });
@@ -98,6 +100,14 @@ export function buildReview(snapshot: Snapshot, today: string): Review {
     unsorted.length + queues.reduce((sum, q) => sum + q.pending.length, 0);
 
   return { unsorted, unsortedDoneToday, queues, deferred, waitingCount };
+}
+
+/**
+ * Markdown for pasting into a digital destination: the capture text only.
+ * Source references are left out by default.
+ */
+export function captureToMarkdown(capture: StoredCapture): string {
+  return capture.text.trim() + "\n";
 }
 
 /** "Written in Weekly Planner" or "Added to Obsidian". */

@@ -6,8 +6,9 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
  *
  * v1: captures
  * v2: destinations, handoffs
+ * v3: events (usage counts; never any writing)
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const DEFAULT_DB_NAME = "writelater";
 /** Demo content lives in its own database so it never mixes with real writing. */
@@ -55,9 +56,32 @@ export interface StoredHandoff {
   revisitOn?: string;
   resolvedAt?: string;
   resolvedVia?: HandoffResolution;
+  /** Set when the text was copied for a digital destination. Copying never completes a handoff. */
+  copiedAt?: string;
   createdAt: string;
   updatedAt: string;
   rev: number;
+}
+
+export type UsageEventType =
+  | "capture_saved"
+  | "save_failed"
+  | "review_opened"
+  | "handoff_sorted"
+  | "handoff_confirmed_paper"
+  | "handoff_confirmed_digital"
+  | "handoff_let_go"
+  | "handoff_deferred"
+  | "copy_succeeded"
+  | "copy_failed"
+  | "undo"
+  | "wanted_other_device";
+
+/** A usage event: a type and a time. Never text, titles, or destination names. */
+export interface StoredEvent {
+  id: string;
+  type: UsageEventType;
+  at: string;
 }
 
 export interface WriteLaterSchema extends DBSchema {
@@ -74,6 +98,11 @@ export interface WriteLaterSchema extends DBSchema {
     key: string;
     value: StoredHandoff;
     indexes: { by_capture: string };
+  };
+  events: {
+    key: string;
+    value: StoredEvent;
+    indexes: { by_at: string };
   };
 }
 
@@ -103,6 +132,10 @@ export function openWriteLaterDb(
         db.createObjectStore("destinations", { keyPath: "id" });
         const handoffs = db.createObjectStore("handoffs", { keyPath: "id" });
         handoffs.createIndex("by_capture", "captureId");
+      }
+      if (oldVersion < 3 && target >= 3) {
+        const events = db.createObjectStore("events", { keyPath: "id" });
+        events.createIndex("by_at", "at");
       }
     },
     blocked() {
