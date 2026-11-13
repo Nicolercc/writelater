@@ -23,8 +23,9 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and on pushes to `mai
 
 1. `pnpm install --frozen-lockfile`
 2. `pnpm run typecheck`
-3. `pnpm --filter @workspace/writelater run test`
-4. `pnpm --filter @workspace/writelater run build`
+3. `pnpm --filter @workspace/writelater run lint` (ESLint with TypeScript and React hook rules; zero warnings allowed)
+4. `pnpm --filter @workspace/writelater run test`
+5. `pnpm --filter @workspace/writelater run build`
 
 A second job runs the end-to-end tests (`pnpm --filter @workspace/writelater run test:e2e`). They build for production, serve the build with `vite preview`, and run Playwright in **Chromium** and **WebKit with iPhone 15 emulation** (WebKit is Safari's engine). The offline test is Chromium-only, because Playwright exposes service workers only there.
 
