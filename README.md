@@ -55,6 +55,7 @@ Run the same commands locally before pushing. Use the pinned pnpm (`corepack ena
 - Review home offers a JSON backup (every record), a Markdown export (text grouped by destination), and a usage summary.
 - The usage log (`events`) records an event type and a time, never writing or names. The usage summary exports counts per local day only.
 - The unsaved draft is kept in `localStorage` until it is saved or cleared.
+- **Deleting:** any capture can be deleted permanently after a confirmation, together with its handoffs, in one transaction. **Erase everything** (Review → Your data) clears every store and this database's `localStorage` keys. Downloaded files and anything copied elsewhere are outside WriteLater and aren't affected.
 - Open `/?demo=1` for sample destinations and items. Demo mode uses a separate `writelater-demo` database.
 
 ## Stack

@@ -10,7 +10,7 @@ import {
   type StoredHandoff,
   type WriteLaterDb,
 } from "../storage/db";
-import { saveCapture, type SaveCaptureInput } from "../storage/captures";
+import { deleteCapture, eraseAll, saveCapture, type SaveCaptureInput } from "../storage/captures";
 import {
   archiveDestination,
   assignCapture,
@@ -31,7 +31,7 @@ import {
   type UndoToken,
   type WriteResult,
 } from "../storage/handoffs";
-import { newOpId } from "../storage/draft";
+import { clearLocalState, newOpId } from "../storage/draft";
 import { seedDemo } from "../data/demo";
 import { buildUsageSummary, listEvents, logEvent, type UsageSummary } from "../storage/usage";
 
@@ -77,6 +77,10 @@ export interface WriteLaterActions {
     reassignTo: string | null,
   ) => Promise<ActionOutcome & { moved?: number }>;
   restoreDestination: (destination: StoredDestination) => Promise<ActionOutcome>;
+  /** Permanently deletes a capture and its handoffs. False if it was already gone. */
+  deleteCapture: (captureId: string) => Promise<boolean>;
+  /** Permanently clears every store and this database's local state. */
+  eraseEverything: () => Promise<void>;
   /** Records a usage event. Best-effort: never throws. */
   logUsage: (type: UsageEventType) => void;
   usageSummary: () => Promise<UsageSummary>;
@@ -292,6 +296,21 @@ export function useWriteLater(dbName: string): UseWriteLater {
       },
       [runPlain],
     ),
+    deleteCapture: useCallback(
+      async (captureId) => {
+        const deleted = await withDb((db) => deleteCapture(db, captureId));
+        channelRef.current?.postMessage("changed");
+        await reload();
+        return deleted;
+      },
+      [withDb, reload],
+    ),
+    eraseEverything: useCallback(async () => {
+      await withDb((db) => eraseAll(db));
+      clearLocalState(dbName);
+      channelRef.current?.postMessage("changed");
+      await reload();
+    }, [withDb, reload, dbName]),
     logUsage,
     usageSummary: useCallback(
       async () => buildUsageSummary(await withDb((db) => listEvents(db))),

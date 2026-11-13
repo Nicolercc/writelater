@@ -130,6 +130,8 @@ export function ReviewScreen({
   /** Text shown for manual copying after the clipboard refused. */
   const [copyFallback, setCopyFallback] = useState<{ handoffId: string; text: string } | null>(null);
   const fallbackRef = useRef<HTMLTextAreaElement>(null);
+  /** Capture awaiting a permanent-delete confirmation. */
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -206,6 +208,7 @@ export function ReviewScreen({
 
   const go = (next: View) => {
     setCopyFallback(null);
+    setConfirmDelete(null);
     setView(next);
     setFocusTarget(HEADING_ID);
   };
@@ -248,6 +251,61 @@ export function ReviewScreen({
       announce("Couldn't undo. Try again.");
     }
   };
+
+  const removeCapture = async (capture: StoredCapture, nextFocusId: string | null) => {
+    try {
+      const deleted = await exclusive(() => actions.deleteCapture(capture.id));
+      if (deleted === undefined) return;
+      setConfirmDelete(null);
+      announce(deleted ? "Deleted permanently." : "That item was already gone. Showing the latest.");
+      setFocusTarget(nextFocusId ?? HEADING_ID);
+    } catch {
+      announce("Couldn't delete. Nothing was changed. Try again.");
+    }
+  };
+
+  const eraseEverything = async () => {
+    const done = await exclusive(async () => {
+      await actions.eraseEverything();
+      return true;
+    });
+    if (!done) return;
+    setSetupSkipped(false);
+    setView({ kind: "home" });
+    announce("Everything was erased from WriteLater on this device.");
+    setFocusTarget(HEADING_ID);
+  };
+
+  /** Inline, two-step permanent delete for one capture. */
+  function deleteControl(capture: StoredCapture, nextFocusId: string | null, showTrigger: boolean) {
+    if (confirmDelete === capture.id) {
+      return (
+        <div role="group" aria-label="Confirm permanent delete" className="mt-3 rounded-xl border border-destructive/40 bg-destructive/5 p-3">
+          <p className="text-sm text-foreground">Delete this capture permanently? This can't be undone.</p>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              autoFocus
+              disabled={busy}
+              onClick={() => removeCapture(capture, nextFocusId)}
+              className="min-h-[44px] px-4 rounded-xl bg-destructive text-destructive-foreground font-medium text-sm"
+            >
+              Delete permanently
+            </button>
+            <button type="button" onClick={() => setConfirmDelete(null)} className={secondaryButton}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (!showTrigger) return null;
+    return (
+      <button type="button" disabled={busy} onClick={() => setConfirmDelete(capture.id)} className={`${secondaryButton} mt-2`}>
+        Delete…
+      </button>
+    );
+  }
 
   /** ID of the control to focus after removing items[index] from a list. */
   function nextIdAfter<T>(items: T[], index: number, idOf: (item: T) => string): string | null {
@@ -371,7 +429,7 @@ export function ReviewScreen({
             )}
           </div>
         )}
-        <DataPanel snapshot={snapshot} download={download} onAnnounce={(m) => announce(m)}>
+        <DataPanel snapshot={snapshot} download={download} onAnnounce={(m) => announce(m)} onErase={eraseEverything}>
           <UsageControls
             loadSummary={actions.usageSummary}
             download={download}
@@ -432,6 +490,7 @@ export function ReviewScreen({
                       Let go
                     </button>
                   </div>
+                  {deleteControl(capture, nextId, true)}
                 </li>
               );
             })}
@@ -572,9 +631,14 @@ export function ReviewScreen({
                           onClick={() => act(() => actions.resolve(handoff, "discarded"), "Let go.", nextId)}>
                           Let go
                         </button>
+                        <button type="button" disabled={busy} className={secondaryButton}
+                          onClick={() => setConfirmDelete(capture.id)}>
+                          Delete permanently…
+                        </button>
                       </div>
                     </details>
                   </div>
+                  {deleteControl(capture, nextId, false)}
                 </li>
               );
             })}
