@@ -28,7 +28,7 @@ describe("DataPanel storage status", () => {
     expect(await screen.findByText(/Not protected yet/)).toHaveTextContent("Using 4.0 KB.");
     await user.click(screen.getByRole("button", { name: "Ask the browser to keep my data" }));
 
-    expect(await screen.findByText(/Protected: the browser won't clear/)).toBeInTheDocument();
+    expect(await screen.findByText(/Persistent storage granted/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Ask the browser to keep my data" })).not.toBeInTheDocument();
     expect(announce).toHaveBeenCalledWith("The browser will keep WriteLater's data.");
   });
