@@ -26,6 +26,10 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and on pushes to `mai
 3. `pnpm --filter @workspace/writelater run test`
 4. `pnpm --filter @workspace/writelater run build`
 
+A second job runs the end-to-end tests (`pnpm --filter @workspace/writelater run test:e2e`). They build for production, serve the build with `vite preview`, and run Playwright in **Chromium** and **WebKit with iPhone 15 emulation** (WebKit is Safari's engine). The offline test is Chromium-only, because Playwright exposes service workers only there.
+
+Locally, install the browsers once with `pnpm --filter @workspace/writelater exec playwright install chromium webkit`. On macOS 14, Playwright 1.64 only offers a frozen WebKit build that this version can't drive, so run `--project=chromium` locally and rely on CI for WebKit.
+
 Run the same commands locally before pushing. Use the pinned pnpm (`corepack enable`, or `npx pnpm@10.34.9`). pnpm 11 rewrites the lockfile.
 
 ## Run & Operate
@@ -50,6 +54,8 @@ Run the same commands locally before pushing. Use the pinned pnpm (`corepack ena
 - A capture with no handoff is **Unsorted**. Sorting it creates a handoff that is pending, deferred until a local date, completed (Written or Added), or discarded (Let go).
 - Every handoff change checks the record's revision inside one transaction and refuses stale writes from another tab. Undo is refused once the item has changed since.
 - Tabs tell each other about writes through `BroadcastChannel`.
+- **Offline:** a hand-written service worker (`sw/service-worker.js`, emitted as `sw.js` by `sw/plugin.ts` with a precache list from the final bundle) serves the app shell cache-first. A new version installs in the background and waits until you tap **Reload to update**, so a tab never runs two versions' code at once. Writing lives in IndexedDB and never passes through the worker.
+- **Durable storage:** after the first save, WriteLater asks the browser to keep its data (`navigator.storage.persist()`). Your data shows whether it's protected and offers to ask again. Browsers decide with their own rules; Safari favors apps added to the Home Screen.
 - Destinations can be renamed (the ID stays the same) and archived. Archiving moves every waiting item to another destination or back to Unsorted in the same transaction. Done items keep their history, and Restore makes an archived destination active again.
 - For digital destinations, **Copy Markdown** copies the capture text only, with no source links. Copying never completes a handoff; you confirm with **Added**. If the clipboard is blocked, the text is shown selected for manual copying.
 - Review home offers a JSON backup (every record), a Markdown export (text grouped by destination), and a usage summary.

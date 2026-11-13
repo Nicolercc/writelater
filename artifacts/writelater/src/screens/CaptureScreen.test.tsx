@@ -1,5 +1,5 @@
 import React from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { openDB } from "idb";
@@ -171,5 +171,31 @@ describe("CaptureScreen durable save", () => {
     oldTab.close();
     await typeAndWaitForReady("SYNTHETIC after unblock");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  describe("durable storage", () => {
+    afterEach(() => {
+      // jsdom has no navigator.storage; remove the stub between tests.
+      delete (navigator as unknown as { storage?: unknown }).storage;
+    });
+
+    it("asks the browser to keep data once, after the first real save", async () => {
+      const persist = vi.fn(async () => true);
+      Object.defineProperty(navigator, "storage", {
+        configurable: true,
+        value: { persisted: vi.fn(async () => false), persist, estimate: vi.fn(async () => ({})) },
+      });
+      render(<Harness />);
+      expect(persist).not.toHaveBeenCalled();
+
+      let user = await typeAndWaitForReady("SYNTHETIC first");
+      await user.click(saveButton());
+      await waitFor(() => expect(persist).toHaveBeenCalledTimes(1));
+
+      user = await typeAndWaitForReady("SYNTHETIC second");
+      await user.click(saveButton());
+      await waitFor(() => expect(status()).toHaveTextContent("Saved."));
+      expect(persist).toHaveBeenCalledTimes(1);
+    });
   });
 });

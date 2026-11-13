@@ -33,6 +33,7 @@ import {
 } from "../storage/handoffs";
 import { clearLocalState, newOpId } from "../storage/draft";
 import { applyRestore, type ApplyResult, type RestorePlan } from "../storage/restore";
+import { requestPersistence } from "../storage/persist";
 import { seedDemo } from "../data/demo";
 import { buildUsageSummary, listEvents, logEvent, type UsageSummary } from "../storage/usage";
 
@@ -107,6 +108,9 @@ export function useWriteLater(dbName: string): UseWriteLater {
   const [status, setStatus] = useState<StoreStatus>("loading");
   const dbRef = useRef<Promise<WriteLaterDb> | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  // Ask for durable storage once per session, after the first real save:
+  // that's when there is something worth keeping and the person is engaged.
+  const persistAskedRef = useRef(false);
 
   const reload = useCallback(async () => {
     const dbPromise = dbRef.current;
@@ -214,12 +218,18 @@ export function useWriteLater(dbName: string): UseWriteLater {
           result = await withDb((db) => saveCapture(db, { ...input, opId: newOpId() }));
         }
         if (result.status === "id-conflict") throw new Error("Could not allocate a capture ID.");
-        if (result.status === "created") logUsage("capture_saved");
+        if (result.status === "created") {
+          logUsage("capture_saved");
+          if (!persistAskedRef.current && dbName !== DEMO_DB_NAME) {
+            persistAskedRef.current = true;
+            void requestPersistence();
+          }
+        }
         channelRef.current?.postMessage("changed");
         await reload();
         return { status: result.status, capture: result.capture };
       },
-      [withDb, reload, logUsage],
+      [withDb, reload, logUsage, dbName],
     ),
     createDestinations: useCallback(
       async (inputs) => {
