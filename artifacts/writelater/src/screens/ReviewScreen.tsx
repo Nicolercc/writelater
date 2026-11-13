@@ -11,6 +11,7 @@ import { copyText as defaultCopyText } from "../lib/clipboard";
 import { downloadFile } from "../lib/export";
 import { DataPanel, type Download } from "../components/review/DataPanel";
 import { UsageControls } from "../components/review/UsageControls";
+import { ManageDestinations } from "../components/review/ManageDestinations";
 import type { Snapshot, UndoToken } from "../storage/handoffs";
 import type { StoredCapture, StoredDestination } from "../storage/db";
 import type { ActionOutcome, StoreStatus, WriteLaterActions } from "../hooks/useWriteLater";
@@ -24,7 +25,8 @@ type View =
   | { kind: "home" }
   | { kind: "unsorted" }
   | { kind: "destination"; id: string }
-  | { kind: "deferred" };
+  | { kind: "deferred" }
+  | { kind: "manage" };
 
 interface Announcement {
   message: string;
@@ -72,6 +74,7 @@ function readView(dbName: string): View {
       (parsed.kind === "home" ||
         parsed.kind === "unsorted" ||
         parsed.kind === "deferred" ||
+        parsed.kind === "manage" ||
         (parsed.kind === "destination" && typeof parsed.id === "string"))
     ) {
       return parsed;
@@ -349,8 +352,13 @@ export function ReviewScreen({
           </div>
         )}
         {!showSetup && (
-          <div className="mt-5">
+          <div className="mt-5 flex flex-col gap-2">
             <AddDestinationForm onAdd={(d) => saveDestinations([d])} />
+            {snapshot.destinations.length > 0 && (
+              <button type="button" onClick={() => go({ kind: "manage" })} className={secondaryButton}>
+                Manage destinations
+              </button>
+            )}
           </div>
         )}
         <DataPanel snapshot={snapshot} download={download} onAnnounce={(m) => announce(m)}>
@@ -604,6 +612,36 @@ export function ReviewScreen({
     );
   }
 
+  function renderManage() {
+    const waitingCounts = new Map<string, number>();
+    for (const h of snapshot.handoffs) {
+      if (h.destinationId && (h.state === "pending" || h.state === "deferred")) {
+        waitingCounts.set(h.destinationId, (waitingCounts.get(h.destinationId) ?? 0) + 1);
+      }
+    }
+    return (
+      <>
+        {backButton}
+        {heading("Destinations", "Rename, archive, or restore where your writing goes.")}
+        <ManageDestinations
+          destinations={snapshot.destinations}
+          waitingCounts={waitingCounts}
+          busy={busy}
+          rename={actions.renameDestination}
+          archive={actions.archiveDestination}
+          restore={actions.restoreDestination}
+          onResult={(message, focusId) => {
+            announce(message);
+            setFocusTarget(focusId ?? HEADING_ID);
+          }}
+        />
+        <div className="mt-5">
+          <AddDestinationForm onAdd={(d) => saveDestinations([d])} />
+        </div>
+      </>
+    );
+  }
+
   /** Resolved-today list: a persistent undo path that doesn't rely on the toast. */
   function renderDoneToday(items: QueueItem[], title: string) {
     if (items.length === 0) return null;
@@ -665,6 +703,7 @@ export function ReviewScreen({
           {view.kind === "unsorted" && renderUnsorted()}
           {view.kind === "destination" && renderDestination()}
           {view.kind === "deferred" && renderDeferred()}
+          {view.kind === "manage" && renderManage()}
         </>
       )}
 
