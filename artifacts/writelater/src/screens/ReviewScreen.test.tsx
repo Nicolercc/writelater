@@ -259,4 +259,65 @@ describe("ReviewScreen", () => {
     expect(usage.content).not.toContain("SYNTHETIC");
     expect(usage.content).not.toContain("Weekly Planner");
   });
+
+  it("renames a destination and every queue follows", async () => {
+    await seed({ assigned: [["SYNTHETIC to write", "planner"]] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "Manage destinations" }));
+    await user.click(await screen.findByRole("button", { name: "Rename Weekly Planner" }));
+
+    const name = screen.getByLabelText("Name");
+    expect(name).toHaveFocus();
+    await user.clear(name);
+    await user.type(name, "Hobonichi");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(statusText()).toHaveTextContent("Renamed to Hobonichi."));
+    expect(screen.getByRole("button", { name: "Rename Hobonichi" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(await screen.findByRole("button", { name: /Hobonichi · This Week/ }));
+    expect(await screen.findByRole("button", { name: "Written in Hobonichi" })).toBeInTheDocument();
+  });
+
+  it("archives a destination, moving waiting items to another one", async () => {
+    await seed({ assigned: [["SYNTHETIC moving", "planner"]] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "Manage destinations" }));
+    await user.click(await screen.findByRole("button", { name: "Archive Weekly Planner" }));
+
+    expect(screen.getByText("1 item still waiting. Where should it go?")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Obsidian" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Archive Weekly Planner" }));
+
+    await waitFor(() =>
+      expect(statusText()).toHaveTextContent("Archived Weekly Planner. Moved 1 item to Obsidian."),
+    );
+    expect(screen.getByRole("heading", { name: "Destinations" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Restore Weekly Planner" })).toBeInTheDocument();
+
+    const db = await openWriteLaterDb(DB);
+    const { handoffs } = await loadSnapshot(db);
+    db.close();
+    expect(handoffs.map((h) => h.destinationId)).toEqual(["vault"]);
+  });
+
+  it("archives to Unsorted, then restores the destination", async () => {
+    await seed({ assigned: [["SYNTHETIC unsort me", "vault"]] });
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: "Manage destinations" }));
+    await user.click(await screen.findByRole("button", { name: "Archive Obsidian" }));
+    await user.click(screen.getByRole("radio", { name: "Back to Unsorted" }));
+    await user.click(screen.getByRole("button", { name: "Archive Obsidian" }));
+    await waitFor(() => expect(statusText()).toHaveTextContent("Moved 1 item to Unsorted."));
+    expect(await handoffStates()).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Restore Obsidian" }));
+    await waitFor(() => expect(statusText()).toHaveTextContent("Restored Obsidian."));
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    expect(await screen.findByRole("button", { name: /^Obsidian/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Unsorted/ })).toHaveTextContent("1");
+  });
 });

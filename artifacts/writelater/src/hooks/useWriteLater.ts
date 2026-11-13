@@ -6,13 +6,17 @@ import {
   type HandoffResolution,
   type UsageEventType,
   type StoredCapture,
+  type StoredDestination,
   type StoredHandoff,
   type WriteLaterDb,
 } from "../storage/db";
 import { saveCapture, type SaveCaptureInput } from "../storage/captures";
 import {
+  archiveDestination,
   assignCapture,
   createDestinations,
+  renameDestination,
+  restoreDestination,
   deferHandoff,
   loadSnapshot,
   markHandoffCopied,
@@ -58,6 +62,16 @@ export interface WriteLaterActions {
   /** Sends a handoff back to Unsorted. */
   unsort: (handoff: StoredHandoff) => Promise<ActionOutcome>;
   undo: (token: UndoToken) => Promise<ActionOutcome>;
+  renameDestination: (
+    destination: StoredDestination,
+    input: { name: string; section?: string },
+  ) => Promise<ActionOutcome>;
+  /** Archives, moving waiting items to `reassignTo` or back to Unsorted (null). */
+  archiveDestination: (
+    destination: StoredDestination,
+    reassignTo: string | null,
+  ) => Promise<ActionOutcome & { moved?: number }>;
+  restoreDestination: (destination: StoredDestination) => Promise<ActionOutcome>;
   /** Records a usage event. Best-effort: never throws. */
   logUsage: (type: UsageEventType) => void;
   usageSummary: () => Promise<UsageSummary>;
@@ -165,6 +179,17 @@ export function useWriteLater(dbName: string): UseWriteLater {
     [withDb, reload, logUsage],
   );
 
+  /** Runs a write that has no undo token (destination changes). */
+  const runPlain = useCallback(
+    async <T,>(fn: (db: WriteLaterDb) => Promise<WriteResult<T>>) => {
+      const result = await withDb(fn);
+      if (result.status === "ok") channelRef.current?.postMessage("changed");
+      await reload();
+      return result;
+    },
+    [withDb, reload],
+  );
+
   const actions: WriteLaterActions = {
     saveCapture: useCallback(
       async (input) => {
@@ -235,6 +260,31 @@ export function useWriteLater(dbName: string): UseWriteLater {
       [run],
     ),
     undo: useCallback((token) => run((db) => undoHandoffWrite(db, token), "undo"), [run]),
+    renameDestination: useCallback(
+      async (destination, input) => {
+        const result = await runPlain((db) => renameDestination(db, destination.id, destination.rev, input));
+        return result.status === "ok" ? { status: "ok", undo: null } : result;
+      },
+      [runPlain],
+    ),
+    archiveDestination: useCallback(
+      async (destination, reassignTo) => {
+        const result = await runPlain((db) =>
+          archiveDestination(db, destination.id, destination.rev, reassignTo),
+        );
+        return result.status === "ok"
+          ? { status: "ok", undo: null, moved: result.value.moved }
+          : result;
+      },
+      [runPlain],
+    ),
+    restoreDestination: useCallback(
+      async (destination) => {
+        const result = await runPlain((db) => restoreDestination(db, destination.id, destination.rev));
+        return result.status === "ok" ? { status: "ok", undo: null } : result;
+      },
+      [runPlain],
+    ),
     logUsage,
     usageSummary: useCallback(
       async () => buildUsageSummary(await withDb((db) => listEvents(db))),
