@@ -163,6 +163,13 @@ export function useWriteLater(dbName: string): UseWriteLater {
     };
   }, [dbName, reload]);
 
+  /**
+   * Re-reads after a write. A failed re-read must never turn a committed
+   * write into an error, so it's swallowed: the write stands, and the next
+   * successful read (another write, another tab, a reload) catches the view up.
+   */
+  const refresh = useCallback(() => reload().catch(() => {}), [reload]);
+
   const withDb = useCallback(async <T,>(fn: (db: WriteLaterDb) => Promise<T>): Promise<T> => {
     const dbPromise = dbRef.current;
     if (!dbPromise) throw new Error("Storage is not open.");
@@ -191,10 +198,10 @@ export function useWriteLater(dbName: string): UseWriteLater {
         channelRef.current?.postMessage("changed");
         if (event) logUsage(event);
       }
-      await reload();
+      await refresh();
       return toOutcome(result);
     },
-    [withDb, reload, logUsage],
+    [withDb, refresh, logUsage],
   );
 
   /** Runs a write that has no undo token (destination changes). */
@@ -202,10 +209,10 @@ export function useWriteLater(dbName: string): UseWriteLater {
     async <T,>(fn: (db: WriteLaterDb) => Promise<WriteResult<T>>) => {
       const result = await withDb(fn);
       if (result.status === "ok") channelRef.current?.postMessage("changed");
-      await reload();
+      await refresh();
       return result;
     },
-    [withDb, reload],
+    [withDb, refresh],
   );
 
   const actions: WriteLaterActions = {
@@ -226,10 +233,10 @@ export function useWriteLater(dbName: string): UseWriteLater {
           }
         }
         channelRef.current?.postMessage("changed");
-        await reload();
+        await refresh();
         return { status: result.status, capture: result.capture };
       },
-      [withDb, reload, logUsage, dbName],
+      [withDb, refresh, logUsage, dbName],
     ),
     createDestinations: useCallback(
       async (inputs) => {
@@ -237,9 +244,9 @@ export function useWriteLater(dbName: string): UseWriteLater {
           createDestinations(db, inputs.map((input) => ({ ...input, id: newOpId() }))),
         );
         channelRef.current?.postMessage("changed");
-        await reload();
+        await refresh();
       },
-      [withDb, reload],
+      [withDb, refresh],
     ),
     assign: useCallback(
       (captureId, destinationId) =>
@@ -313,25 +320,25 @@ export function useWriteLater(dbName: string): UseWriteLater {
       async (captureId) => {
         const deleted = await withDb((db) => deleteCapture(db, captureId));
         channelRef.current?.postMessage("changed");
-        await reload();
+        await refresh();
         return deleted;
       },
-      [withDb, reload],
+      [withDb, refresh],
     ),
     eraseEverything: useCallback(async () => {
       await withDb((db) => eraseAll(db));
       clearLocalState(dbName);
       channelRef.current?.postMessage("changed");
-      await reload();
-    }, [withDb, reload, dbName]),
+      await refresh();
+    }, [withDb, refresh, dbName]),
     restoreBackup: useCallback(
       async (plan) => {
         const result = await withDb((db) => applyRestore(db, plan));
         if (result.status === "ok") channelRef.current?.postMessage("changed");
-        await reload();
+        await refresh();
         return result;
       },
-      [withDb, reload],
+      [withDb, refresh],
     ),
     logUsage,
     usageSummary: useCallback(
