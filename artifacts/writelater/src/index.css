@@ -91,14 +91,16 @@
   --popover-foreground: 20 18% 17%;
   --popover-border: 30 30% 86%;
 
-  --primary: 16 52% 64%;
+  /* L42% gives 5.25:1 against primary-foreground and 5.4:1 as text on surface (WCAG AA). */
+  --primary: 16 52% 42%;
   --primary-foreground: 36 50% 97%;
 
   --secondary: 120 12% 86%;
   --secondary-foreground: 20 18% 17%;
 
   --muted: 30 22% 91%;
-  --muted-foreground: 20 10% 50%;
+  /* L42% gives 5.1:1 on the elevated surface (was 3.8:1). */
+  --muted-foreground: 20 10% 42%;
 
   --accent: 45 75% 88%;
   --accent-foreground: 20 18% 17%;
@@ -107,7 +109,7 @@
   --destructive-foreground: 36 50% 97%;
 
   --input: 30 30% 86%;
-  --ring: 16 52% 64%;
+  --ring: 16 52% 42%;
 
   --sidebar: 36 33% 95%;
   --sidebar-foreground: 20 18% 17%;
@@ -178,6 +180,26 @@
   --sidebar-accent: 25 15% 25%;
   --sidebar-accent-foreground: 38 36% 96%;
   --sidebar-ring: 16 45% 45%;
+}
+
+/* iPhone safe areas; needs viewport-fit=cover in index.html. */
+@utility pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Respect the system Reduce Motion setting for CSS transitions and animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer base {

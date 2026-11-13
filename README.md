@@ -1,6 +1,6 @@
 # WriteLater
 
-Capture messy thoughts on the go, then know exactly where to write them in your paper planner later.
+Capture a thought on your phone, then move it into your paper planner or digital notes and confirm the handoff.
 
 ## Deploying WriteLater
 

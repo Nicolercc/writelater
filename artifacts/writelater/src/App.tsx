@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { MotionConfig } from "framer-motion";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 import { AppShell } from "./components/AppShell";
@@ -88,9 +89,13 @@ function AppContent({ demo }: { demo: boolean }) {
 function App() {
   const demo = useMemo(isDemoMode, []);
   return (
-    <TooltipProvider>
-      <AppContent demo={demo} />
-    </TooltipProvider>
+    // reducedMotion="user" turns off framer-motion transforms when the system
+    // Reduce Motion setting is on.
+    <MotionConfig reducedMotion="user">
+      <TooltipProvider>
+        <AppContent demo={demo} />
+      </TooltipProvider>
+    </MotionConfig>
   );
 }
 
