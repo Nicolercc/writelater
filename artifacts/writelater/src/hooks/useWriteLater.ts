@@ -32,6 +32,7 @@ import {
   type WriteResult,
 } from "../storage/handoffs";
 import { clearLocalState, newOpId } from "../storage/draft";
+import { applyRestore, type ApplyResult, type RestorePlan } from "../storage/restore";
 import { seedDemo } from "../data/demo";
 import { buildUsageSummary, listEvents, logEvent, type UsageSummary } from "../storage/usage";
 
@@ -81,6 +82,8 @@ export interface WriteLaterActions {
   deleteCapture: (captureId: string) => Promise<boolean>;
   /** Permanently clears every store and this database's local state. */
   eraseEverything: () => Promise<void>;
+  /** Writes a previewed restore plan atomically. */
+  restoreBackup: (plan: RestorePlan) => Promise<ApplyResult>;
   /** Records a usage event. Best-effort: never throws. */
   logUsage: (type: UsageEventType) => void;
   usageSummary: () => Promise<UsageSummary>;
@@ -311,6 +314,15 @@ export function useWriteLater(dbName: string): UseWriteLater {
       channelRef.current?.postMessage("changed");
       await reload();
     }, [withDb, reload, dbName]),
+    restoreBackup: useCallback(
+      async (plan) => {
+        const result = await withDb((db) => applyRestore(db, plan));
+        if (result.status === "ok") channelRef.current?.postMessage("changed");
+        await reload();
+        return result;
+      },
+      [withDb, reload],
+    ),
     logUsage,
     usageSummary: useCallback(
       async () => buildUsageSummary(await withDb((db) => listEvents(db))),

@@ -429,7 +429,9 @@ export function ReviewScreen({
             )}
           </div>
         )}
-        <DataPanel snapshot={snapshot} download={download} onAnnounce={(m) => announce(m)} onErase={eraseEverything}>
+        <DataPanel snapshot={snapshot} download={download} onAnnounce={(m) => announce(m)} onErase={eraseEverything}
+          onRestore={(plan) => exclusive(() => actions.restoreBackup(plan))}
+        >
           <UsageControls
             loadSummary={actions.usageSummary}
             download={download}
