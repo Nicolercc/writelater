@@ -1,37 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import {
-  buildReview,
-  addDays,
-  captureToMarkdown,
-  confirmLabel,
-  type QueueItem,
-} from "../lib/review";
+import React, { useEffect, useMemo, useState } from "react";
+import { buildReview } from "../lib/review";
 import { copyText as defaultCopyText } from "../lib/clipboard";
 import { downloadFile } from "../lib/export";
-import { DataPanel, type Download } from "../components/review/DataPanel";
-import { UsageControls } from "../components/review/UsageControls";
-import { ManageDestinations } from "../components/review/ManageDestinations";
-import type { Snapshot, UndoToken } from "../storage/handoffs";
-import type { StoredCapture, StoredDestination } from "../storage/db";
-import type { ActionOutcome, StoreStatus, WriteLaterActions } from "../hooks/useWriteLater";
-import {
-  AddDestinationForm,
-  DestinationSetup,
-  type DestinationDraft,
-} from "../components/review/DestinationForms";
-
-type View =
-  | { kind: "home" }
-  | { kind: "unsorted" }
-  | { kind: "destination"; id: string }
-  | { kind: "deferred" }
-  | { kind: "manage" };
-
-interface Announcement {
-  message: string;
-  undo: UndoToken | null;
-}
+import type { Download } from "../components/review/DataPanel";
+import type { DestinationDraft } from "../components/review/DestinationForms";
+import type { Snapshot } from "../storage/handoffs";
+import type { StoreStatus, WriteLaterActions } from "../hooks/useWriteLater";
+import { useReviewController } from "../hooks/useReviewController";
+import { AnnouncementBar } from "../components/review/AnnouncementBar";
+import { ReviewHome } from "../components/review/views/ReviewHome";
+import { UnsortedQueue } from "../components/review/views/UnsortedQueue";
+import { DestinationQueueView } from "../components/review/views/DestinationQueueView";
+import { DeferredQueue } from "../components/review/views/DeferredQueue";
+import { ManageView } from "../components/review/views/ManageView";
 
 interface ReviewScreenProps {
   dbName: string;
@@ -47,42 +28,8 @@ interface ReviewScreenProps {
   download?: Download;
 }
 
-const UNDO_MS = 8000;
-const HEADING_ID = "review-view-heading";
-
-const cardClass =
-  "bg-[var(--surface)] border border-[var(--paper-border)] rounded-2xl p-4";
-const primaryButton =
-  "min-h-[44px] px-4 rounded-xl bg-primary text-primary-foreground font-medium text-sm";
-const secondaryButton =
-  "min-h-[44px] px-3 rounded-xl border border-[var(--paper-border)] bg-background text-foreground text-sm";
-
 function setupSkippedKey(dbName: string) {
   return `writelater:setup-skipped:${dbName}`;
-}
-
-function viewKey(dbName: string) {
-  return `writelater:review-view:${dbName}`;
-}
-
-/** The last open queue, so returning after an interruption lands in place. */
-function readView(dbName: string): View {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(viewKey(dbName)) ?? "null") as View | null;
-    if (
-      parsed &&
-      (parsed.kind === "home" ||
-        parsed.kind === "unsorted" ||
-        parsed.kind === "deferred" ||
-        parsed.kind === "manage" ||
-        (parsed.kind === "destination" && typeof parsed.id === "string"))
-    ) {
-      return parsed;
-    }
-  } catch {
-    // Fall through to home.
-  }
-  return { kind: "home" };
 }
 
 function readFlag(key: string): boolean {
@@ -93,28 +40,12 @@ function readFlag(key: string): boolean {
   }
 }
 
-function formatDay(day: string): string {
-  const [y, m, d] = day.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function destinationLabel(d: StoredDestination) {
-  return d.section ? `${d.name} · ${d.section}` : d.name;
-}
-
-/** Plain-text capture body. Never rendered as HTML. */
-function CaptureText({ capture }: { capture: StoredCapture }) {
-  return (
-    <p className="text-[15px] leading-relaxed text-foreground whitespace-pre-wrap break-words">
-      {capture.text}
-    </p>
-  );
-}
-
+/**
+ * Review: routes between its views and owns what spans them (first-run
+ * setup, erasing everything). Each view lives in components/review/views;
+ * the shared machinery (focus, one write at a time, announcements) lives in
+ * useReviewController.
+ */
 export function ReviewScreen({
   dbName,
   status,
@@ -126,142 +57,36 @@ export function ReviewScreen({
   download = downloadFile,
 }: ReviewScreenProps) {
   const review = useMemo(() => buildReview(snapshot, today), [snapshot, today]);
-  const [view, setView] = useState<View>(() => readView(dbName));
-  /** Text shown for manual copying after the clipboard refused. */
-  const [copyFallback, setCopyFallback] = useState<{ handoffId: string; text: string } | null>(null);
-  const fallbackRef = useRef<HTMLTextAreaElement>(null);
-  /** Capture awaiting a permanent-delete confirmation. */
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(viewKey(dbName), JSON.stringify(view));
-    } catch {
-      // Not remembered; harmless.
-    }
-  }, [dbName, view]);
-
-  useEffect(() => {
-    if (copyFallback) {
-      fallbackRef.current?.focus();
-      fallbackRef.current?.select();
-    }
-  }, [copyFallback]);
-  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
-  const [focusTarget, setFocusTarget] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  // State updates land a render later, so two taps in one frame both see
-  // busy=false. The ref closes that gap; the state drives disabled styling.
-  const busyRef = useRef(false);
-
-  /** Runs one write at a time; a second call while one is in flight is ignored. */
-  const exclusive = async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
-    if (busyRef.current) return undefined;
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      return await fn();
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  };
+  const controller = useReviewController(dbName, snapshot, actions);
+  const { view, setView, announce, focus, exclusive } = controller;
   const [setupSkipped, setSetupSkipped] = useState(() => readFlag(setupSkippedKey(dbName)));
-  const undoRegionRef = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<number | null>(null);
 
-  const activeDestinations = snapshot.destinations.filter((d) => !d.archivedAt);
+  const activeDestinations = useMemo(
+    () => snapshot.destinations.filter((d) => !d.archivedAt),
+    [snapshot.destinations],
+  );
   const currentQueue =
     view.kind === "destination" ? review.queues.find((q) => q.destination.id === view.id) : undefined;
 
   // If the open destination disappears (e.g. archived elsewhere), go home.
   useEffect(() => {
     if (view.kind === "destination" && status === "ready" && !currentQueue) setView({ kind: "home" });
-  }, [view, status, currentQueue]);
+  }, [view, status, currentQueue, setView]);
 
-  // Move focus after view changes and actions, once the DOM reflects them.
-  useEffect(() => {
-    if (!focusTarget) return;
-    const el =
-      document.getElementById(focusTarget) ?? document.getElementById(HEADING_ID);
-    el?.focus();
-    setFocusTarget(null);
-  }, [focusTarget, snapshot, view]);
-
-  // Auto-dismiss the message and its undo offer, but never while focus is
-  // inside it. The resolved-today lists remain a persistent way back.
-  const scheduleDismiss = () => {
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      if (undoRegionRef.current?.contains(document.activeElement)) return;
-      setAnnouncement(null);
-    }, UNDO_MS);
-  };
-  useEffect(() => () => {
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-  }, []);
-
-  const announce = (message: string, undo: UndoToken | null = null) => {
-    setAnnouncement({ message, undo });
-    scheduleDismiss();
+  const saveDestinations = async (drafts: DestinationDraft[]) => {
+    await actions.createDestinations(drafts);
+    announce(drafts.length === 1 ? "Destination added." : "Destinations added.");
+    focus(null);
   };
 
-  const go = (next: View) => {
-    setCopyFallback(null);
-    setConfirmDelete(null);
-    setView(next);
-    setFocusTarget(HEADING_ID);
-  };
-
-  /**
-   * Runs one review action, announces the result, and moves focus to the
-   * next item in the list (or the heading when the list empties).
-   */
-  const act = async (
-    run: () => Promise<ActionOutcome>,
-    success: string,
-    nextFocusId: string | null,
-  ) => {
+  const skipSetup = () => {
     try {
-      const outcome = await exclusive(run);
-      if (!outcome) return; // A tap while another action was in flight.
-      if (outcome.status === "ok") {
-        announce(success, outcome.undo);
-        setFocusTarget(nextFocusId ?? HEADING_ID);
-      } else if (outcome.status === "stale") {
-        announce("That item changed in another tab. Showing the latest.");
-      } else {
-        announce("That item no longer exists. Showing the latest.");
-      }
+      localStorage.setItem(setupSkippedKey(dbName), "1");
     } catch {
-      announce("Couldn't save that change. Nothing was changed. Try again.");
+      // Not remembered across reloads; harmless.
     }
-  };
-
-  const handleUndo = async (token: UndoToken) => {
-    try {
-      const outcome = await exclusive(() => actions.undo(token));
-      if (!outcome) return;
-      announce(
-        outcome.status === "ok"
-          ? "Undone."
-          : "Can't undo: that item changed since. Showing the latest.",
-      );
-    } catch {
-      announce("Couldn't undo. Try again.");
-    }
-  };
-
-  const removeCapture = async (capture: StoredCapture, nextFocusId: string | null) => {
-    try {
-      const deleted = await exclusive(() => actions.deleteCapture(capture.id));
-      if (deleted === undefined) return;
-      setConfirmDelete(null);
-      announce(deleted ? "Deleted permanently." : "That item was already gone. Showing the latest.");
-      setFocusTarget(nextFocusId ?? HEADING_ID);
-    } catch {
-      announce("Couldn't delete. Nothing was changed. Try again.");
-    }
+    setSetupSkipped(true);
+    focus(null);
   };
 
   const eraseEverything = async () => {
@@ -273,493 +98,8 @@ export function ReviewScreen({
     setSetupSkipped(false);
     setView({ kind: "home" });
     announce("Everything was erased from WriteLater on this device.");
-    setFocusTarget(HEADING_ID);
+    focus(null);
   };
-
-  /** Inline, two-step permanent delete for one capture. */
-  function deleteControl(capture: StoredCapture, nextFocusId: string | null, showTrigger: boolean) {
-    if (confirmDelete === capture.id) {
-      return (
-        <div role="group" aria-label="Confirm permanent delete" className="mt-3 rounded-xl border border-destructive/40 bg-destructive/5 p-3">
-          <p className="text-sm text-foreground">Delete this capture permanently? This can't be undone.</p>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              autoFocus
-              disabled={busy}
-              onClick={() => removeCapture(capture, nextFocusId)}
-              className="min-h-[44px] px-4 rounded-xl bg-destructive text-destructive-foreground font-medium text-sm"
-            >
-              Delete permanently
-            </button>
-            <button type="button" onClick={() => setConfirmDelete(null)} className={secondaryButton}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      );
-    }
-    if (!showTrigger) return null;
-    return (
-      <button type="button" disabled={busy} onClick={() => setConfirmDelete(capture.id)} className={`${secondaryButton} mt-2`}>
-        Delete…
-      </button>
-    );
-  }
-
-  /** ID of the control to focus after removing items[index] from a list. */
-  function nextIdAfter<T>(items: T[], index: number, idOf: (item: T) => string): string | null {
-    const neighbour = items[index + 1] ?? items[index - 1];
-    return neighbour ? idOf(neighbour) : null;
-  }
-
-  const saveDestinations = async (drafts: DestinationDraft[]) => {
-    await actions.createDestinations(drafts);
-    announce(drafts.length === 1 ? "Destination added." : "Destinations added.");
-    setFocusTarget(HEADING_ID);
-  };
-
-  const skipSetup = () => {
-    try {
-      localStorage.setItem(setupSkippedKey(dbName), "1");
-    } catch {
-      // Not remembered across reloads; harmless.
-    }
-    setSetupSkipped(true);
-    setFocusTarget(HEADING_ID);
-  };
-
-  // ---------------------------------------------------------------- views
-
-  const backButton = (
-    <button
-      type="button"
-      onClick={() => go({ kind: "home" })}
-      className="inline-flex items-center gap-1 min-h-[44px] -ml-2 px-2 text-sm text-foreground"
-    >
-      <ChevronLeft className="w-4 h-4" aria-hidden />
-      Review
-    </button>
-  );
-
-  const heading = (text: React.ReactNode, sub?: React.ReactNode) => (
-    <div className="mb-4">
-      <h1
-        id={HEADING_ID}
-        tabIndex={-1}
-        className="font-serif text-2xl font-medium text-foreground leading-snug focus:outline-none"
-      >
-        {text}
-      </h1>
-      {sub && <p className="text-sm text-muted-foreground mt-1">{sub}</p>}
-    </div>
-  );
-
-  function renderHome() {
-    const showSetup = activeDestinations.length === 0 && !setupSkipped;
-    const nothingAtAll =
-      review.unsorted.length === 0 &&
-      review.queues.every((q) => q.pending.length === 0) &&
-      review.deferred.length === 0;
-
-    const row = (
-      key: string,
-      label: React.ReactNode,
-      count: number,
-      onClick: () => void,
-      hint?: string,
-    ) => (
-      <li key={key}>
-        <button
-          type="button"
-          onClick={onClick}
-          className="w-full flex items-center gap-3 min-h-[56px] px-4 py-3 text-left bg-[var(--surface)] border border-[var(--paper-border)] rounded-2xl"
-        >
-          <span className="flex-1 min-w-0">
-            <span className="block text-[15px] font-medium text-foreground truncate">{label}</span>
-            {hint && <span className="block text-xs text-muted-foreground mt-0.5">{hint}</span>}
-          </span>
-          <span className="font-serif text-xl text-foreground" aria-label={`${count} waiting`}>
-            {count}
-          </span>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" aria-hidden />
-        </button>
-      </li>
-    );
-
-    return (
-      <>
-        {heading("Review", `${review.waitingCount} waiting`)}
-        {showSetup && (
-          <div className="mb-5">
-            <DestinationSetup onSave={saveDestinations} onSkip={skipSetup} />
-          </div>
-        )}
-        <ul className="space-y-2" aria-label="Queues">
-          {row("unsorted", "Unsorted", review.unsorted.length, () => go({ kind: "unsorted" }), "Choose where each thought goes")}
-          {review.queues.map((q) =>
-            row(
-              q.destination.id,
-              destinationLabel(q.destination),
-              q.pending.length,
-              () => go({ kind: "destination", id: q.destination.id }),
-              q.destination.kind === "paper" ? "Paper" : "Digital",
-            ),
-          )}
-          {review.deferred.length > 0 &&
-            row("deferred", "Later", review.deferred.length, () => go({ kind: "deferred" }), "Returns on its date")}
-        </ul>
-        {nothingAtAll && !showSetup && (
-          <div className="text-center py-8">
-            <p className="text-sm text-muted-foreground">
-              Nothing waiting. New thoughts land in Unsorted.
-            </p>
-            <button type="button" onClick={onCapture} className={`${secondaryButton} mt-3`}>
-              Capture a thought
-            </button>
-          </div>
-        )}
-        {!showSetup && (
-          <div className="mt-5 flex flex-col gap-2">
-            <AddDestinationForm onAdd={(d) => saveDestinations([d])} />
-            {snapshot.destinations.length > 0 && (
-              <button type="button" onClick={() => go({ kind: "manage" })} className={secondaryButton}>
-                Manage destinations
-              </button>
-            )}
-          </div>
-        )}
-        <DataPanel snapshot={snapshot} download={download} onAnnounce={(m) => announce(m)} onErase={eraseEverything}
-          onRestore={(plan) => exclusive(() => actions.restoreBackup(plan))}
-        >
-          <UsageControls
-            loadSummary={actions.usageSummary}
-            download={download}
-            onWantedOtherDevice={() => actions.logUsage("wanted_other_device")}
-            onAnnounce={(m) => announce(m)}
-          />
-        </DataPanel>
-      </>
-    );
-  }
-
-  function renderUnsorted() {
-    const items = review.unsorted;
-    const primaryId = (c: StoredCapture) => `sort-${c.id}`;
-    return (
-      <>
-        {backButton}
-        {heading(`Unsorted · ${items.length}`, "Send each thought where it belongs.")}
-        {activeDestinations.length === 0 && (
-          <div className={`${cardClass} mb-4`}>
-            <p className="text-sm text-foreground">Add a destination to sort into.</p>
-            <button type="button" onClick={() => go({ kind: "home" })} className={`${secondaryButton} mt-3`}>
-              Set up destinations
-            </button>
-          </div>
-        )}
-        {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">Nothing to sort.</p>
-        ) : (
-          <ul className="space-y-3">
-            {items.map((capture, index) => {
-              const nextId = nextIdAfter(items, index, primaryId);
-              return (
-                <li key={capture.id} className={cardClass}>
-                  <CaptureText capture={capture} />
-                  <div role="group" aria-label="Send to" className="mt-3 flex flex-wrap gap-2">
-                    {activeDestinations.map((d, i) => (
-                      <button
-                        key={d.id}
-                        id={i === 0 ? primaryId(capture) : undefined}
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          act(() => actions.assign(capture.id, d.id), `Sent to ${d.name}.`, nextId)
-                        }
-                        className={secondaryButton}
-                      >
-                        {d.name}
-                      </button>
-                    ))}
-                    <button
-                      id={activeDestinations.length === 0 ? primaryId(capture) : undefined}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => act(() => actions.assign(capture.id, null), "Let go.", nextId)}
-                      className={`${secondaryButton} ml-auto`}
-                    >
-                      Let go
-                    </button>
-                  </div>
-                  {deleteControl(capture, nextId, true)}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {renderDoneToday(review.unsortedDoneToday, "Let go today")}
-      </>
-    );
-  }
-
-  function renderDestination() {
-    if (!currentQueue) return null;
-    const { destination, pending, doneToday } = currentQueue;
-    const primaryId = (i: QueueItem) => `confirm-${i.handoff.id}`;
-    const others = activeDestinations.filter((d) => d.id !== destination.id);
-    const verb = destination.kind === "paper" ? "to write" : "to add";
-
-    return (
-      <>
-        {backButton}
-        {heading(destination.name, [destination.section, `${pending.length} ${verb}`].filter(Boolean).join(" · "))}
-        {pending.length === 0 ? (
-          <div className="text-center py-6">
-            <p className="text-sm text-muted-foreground">Nothing waiting for {destination.name}.</p>
-            {review.unsorted.length > 0 && (
-              <button type="button" onClick={() => go({ kind: "unsorted" })} className={`${secondaryButton} mt-3`}>
-                Sort {review.unsorted.length} unsorted
-              </button>
-            )}
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {pending.map((item, index) => {
-              const nextId = nextIdAfter(pending, index, primaryId);
-              const { handoff, capture } = item;
-              return (
-                <li key={handoff.id} className={cardClass}>
-                  <CaptureText capture={capture} />
-                  {handoff.state === "deferred" && handoff.revisitOn && (
-                    <p className="text-xs text-muted-foreground mt-1">Back from {formatDay(handoff.revisitOn)}</p>
-                  )}
-                  {handoff.copiedAt && (
-                    <p className="text-xs text-foreground mt-2">
-                      Copied. Paste it into {destination.name}, then confirm.
-                    </p>
-                  )}
-                  {copyFallback?.handoffId === handoff.id && (
-                    <div className="mt-3">
-                      <p role="alert" className="text-sm text-foreground mb-2">
-                        Copy didn't work. The text is selected: press ⌘C, or long-press and choose Copy.
-                      </p>
-                      <label htmlFor={`fallback-${handoff.id}`} className="sr-only">
-                        Text to copy
-                      </label>
-                      <textarea
-                        id={`fallback-${handoff.id}`}
-                        ref={fallbackRef}
-                        readOnly
-                        value={copyFallback.text}
-                        rows={Math.min(6, copyFallback.text.split("\n").length + 1)}
-                        className="w-full rounded-xl border border-[var(--paper-border)] bg-background p-2 text-sm text-foreground"
-                      />
-                    </div>
-                  )}
-                  <div className="mt-3 flex flex-wrap items-start gap-2">
-                    {destination.kind === "digital" && !handoff.copiedAt && (
-                      <button
-                        id={primaryId(item)}
-                        type="button"
-                        disabled={busy}
-                        onClick={async () => {
-                          if (busyRef.current) return;
-                          const markdown = captureToMarkdown(capture);
-                          if (await copyText(markdown)) {
-                            setCopyFallback(null);
-                            // Copy alone never completes the handoff.
-                            await act(
-                              () => actions.markCopied(handoff),
-                              `Copied. Paste it into ${destination.name}, then confirm.`,
-                              // Once copied, Added becomes this item's primary control.
-                              primaryId(item),
-                            );
-                          } else {
-                            actions.logUsage("copy_failed");
-                            setCopyFallback({ handoffId: handoff.id, text: markdown });
-                          }
-                        }}
-                        className={primaryButton}
-                      >
-                        Copy Markdown
-                      </button>
-                    )}
-                    <button
-                      id={
-                        destination.kind === "digital" && !handoff.copiedAt
-                          ? `added-${handoff.id}`
-                          : primaryId(item)
-                      }
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        act(
-                          () => actions.resolve(handoff, destination.kind === "paper" ? "written" : "added"),
-                          `Marked ${destination.kind === "paper" ? "written" : "added"}.`,
-                          nextId,
-                        )
-                      }
-                      className={
-                        destination.kind === "digital" && !handoff.copiedAt ? secondaryButton : primaryButton
-                      }
-                    >
-                      {confirmLabel(destination)}
-                    </button>
-                    <details className="group">
-                      <summary className={`${secondaryButton} inline-flex items-center cursor-pointer list-none`}>
-                        More<span className="sr-only"> options for this item</span>
-                      </summary>
-                      <div className="mt-2 flex flex-col gap-2">
-                        <button type="button" disabled={busy} className={secondaryButton}
-                          onClick={() => act(() => actions.defer(handoff, addDays(today, 1)), "Moved to tomorrow.", nextId)}>
-                          Later: tomorrow
-                        </button>
-                        <button type="button" disabled={busy} className={secondaryButton}
-                          onClick={() => act(() => actions.defer(handoff, addDays(today, 7)), "Moved to next week.", nextId)}>
-                          Later: next week
-                        </button>
-                        {others.map((d) => (
-                          <button key={d.id} type="button" disabled={busy} className={secondaryButton}
-                            onClick={() => act(() => actions.move(handoff, d.id), `Moved to ${d.name}.`, nextId)}>
-                            Move to {d.name}
-                          </button>
-                        ))}
-                        <button type="button" disabled={busy} className={secondaryButton}
-                          onClick={() => act(() => actions.unsort(handoff), "Sent back to Unsorted.", nextId)}>
-                          Back to Unsorted
-                        </button>
-                        <button type="button" disabled={busy} className={secondaryButton}
-                          onClick={() => act(() => actions.resolve(handoff, "discarded"), "Let go.", nextId)}>
-                          Let go
-                        </button>
-                        <button type="button" disabled={busy} className={secondaryButton}
-                          onClick={() => setConfirmDelete(capture.id)}>
-                          Delete permanently…
-                        </button>
-                      </div>
-                    </details>
-                  </div>
-                  {deleteControl(capture, nextId, false)}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {renderDoneToday(doneToday, "Done today")}
-      </>
-    );
-  }
-
-  function renderDeferred() {
-    const items = review.deferred;
-    const primaryId = (i: QueueItem) => `bring-${i.handoff.id}`;
-    const nameOf = (id: string | null) =>
-      snapshot.destinations.find((d) => d.id === id)?.name ?? "Unsorted";
-    return (
-      <>
-        {backButton}
-        {heading(`Later · ${items.length}`, "Each item returns to its queue on its date.")}
-        {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-6 text-center">Nothing set aside.</p>
-        ) : (
-          <ul className="space-y-3">
-            {items.map((item, index) => (
-              <li key={item.handoff.id} className={cardClass}>
-                <CaptureText capture={item.capture} />
-                <p className="text-xs text-muted-foreground mt-1">
-                  {nameOf(item.handoff.destinationId)} · returns {formatDay(item.handoff.revisitOn ?? today)}
-                </p>
-                <button
-                  id={primaryId(item)}
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => actions.reactivate(item.handoff), "Brought back.", nextIdAfter(items, index, primaryId))
-                  }
-                  className={`${secondaryButton} mt-3`}
-                >
-                  Bring back now
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </>
-    );
-  }
-
-  function renderManage() {
-    const waitingCounts = new Map<string, number>();
-    for (const h of snapshot.handoffs) {
-      if (h.destinationId && (h.state === "pending" || h.state === "deferred")) {
-        waitingCounts.set(h.destinationId, (waitingCounts.get(h.destinationId) ?? 0) + 1);
-      }
-    }
-    return (
-      <>
-        {backButton}
-        {heading("Destinations", "Rename, archive, or restore where your writing goes.")}
-        <ManageDestinations
-          destinations={snapshot.destinations}
-          waitingCounts={waitingCounts}
-          busy={busy}
-          rename={(d, input) => exclusive(() => actions.renameDestination(d, input))}
-          archive={(d, target) => exclusive(() => actions.archiveDestination(d, target))}
-          restore={(d) => exclusive(() => actions.restoreDestination(d))}
-          onResult={(message, focusId) => {
-            announce(message);
-            setFocusTarget(focusId ?? HEADING_ID);
-          }}
-        />
-        <div className="mt-5">
-          <AddDestinationForm onAdd={(d) => saveDestinations([d])} />
-        </div>
-      </>
-    );
-  }
-
-  /** Resolved-today list: a persistent undo path that doesn't rely on the toast. */
-  function renderDoneToday(items: QueueItem[], title: string) {
-    if (items.length === 0) return null;
-    return (
-      <section aria-labelledby="done-today" className="mt-6">
-        <h2 id="done-today" className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
-          {title}
-        </h2>
-        <ul className="space-y-2">
-          {items.map((item) => (
-            <li key={item.handoff.id} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-muted/40">
-              <span className="flex-1 min-w-0 text-sm text-muted-foreground truncate">
-                <span className="sr-only">
-                  {item.handoff.resolvedVia === "discarded" ? "Let go: " : "Done: "}
-                </span>
-                {item.capture.text}
-              </span>
-              <button
-                type="button"
-                disabled={busy}
-                className={secondaryButton}
-                aria-label={`Bring back: ${item.capture.text}`}
-                onClick={() =>
-                  act(
-                    () =>
-                      item.handoff.destinationId === null
-                        ? actions.unsort(item.handoff)
-                        : actions.reactivate(item.handoff),
-                    "Brought back.",
-                    null,
-                  )
-                }
-              >
-                Bring back
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-    );
-  }
 
   return (
     <div className="px-5 pt-5 pb-28">
@@ -782,52 +122,61 @@ export function ReviewScreen({
       )}
       {(status === "ready" || status === "stale") && (
         <>
-          {view.kind === "home" && renderHome()}
-          {view.kind === "unsorted" && renderUnsorted()}
-          {view.kind === "destination" && renderDestination()}
-          {view.kind === "deferred" && renderDeferred()}
-          {view.kind === "manage" && renderManage()}
+          {view.kind === "home" && (
+            <ReviewHome
+              review={review}
+              snapshot={snapshot}
+              actions={actions}
+              controller={controller}
+              showSetup={activeDestinations.length === 0 && !setupSkipped}
+              onSaveDestinations={saveDestinations}
+              onSkipSetup={skipSetup}
+              onErase={eraseEverything}
+              onCapture={onCapture}
+              download={download}
+            />
+          )}
+          {view.kind === "unsorted" && (
+            <UnsortedQueue
+              review={review}
+              activeDestinations={activeDestinations}
+              controller={controller}
+              actions={actions}
+            />
+          )}
+          {view.kind === "destination" && currentQueue && (
+            <DestinationQueueView
+              key={currentQueue.destination.id}
+              queue={currentQueue}
+              unsortedCount={review.unsorted.length}
+              activeDestinations={activeDestinations}
+              controller={controller}
+              actions={actions}
+              today={today}
+              copyText={copyText}
+            />
+          )}
+          {view.kind === "deferred" && (
+            <DeferredQueue
+              items={review.deferred}
+              destinations={snapshot.destinations}
+              controller={controller}
+              actions={actions}
+              today={today}
+            />
+          )}
+          {view.kind === "manage" && (
+            <ManageView
+              snapshot={snapshot}
+              controller={controller}
+              actions={actions}
+              onSaveDestinations={saveDestinations}
+            />
+          )}
         </>
       )}
 
-      {/* Always mounted so every result is announced. Undo stays while focused. */}
-      <div
-        ref={undoRegionRef}
-        onBlur={() => announcement && scheduleDismiss()}
-        className="fixed left-1/2 -translate-x-1/2 bottom-24 w-[calc(100%-2.5rem)] max-w-[390px] z-20 pointer-events-none"
-      >
-        <div
-          className={
-            announcement
-              ? "pointer-events-auto flex items-center gap-3 rounded-2xl bg-foreground text-background px-4 py-2 shadow-lg"
-              : "sr-only"
-          }
-        >
-          <p role="status" aria-live="polite" className="flex-1 text-sm py-2">
-            {announcement?.message ?? ""}
-          </p>
-          {announcement?.undo && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => announcement.undo && handleUndo(announcement.undo)}
-              className="min-h-[44px] px-3 rounded-xl text-sm font-semibold underline underline-offset-2"
-            >
-              Undo
-            </button>
-          )}
-          {announcement && (
-            <button
-              type="button"
-              onClick={() => setAnnouncement(null)}
-              aria-label="Dismiss message"
-              className="min-h-[44px] min-w-[44px] text-sm"
-            >
-              ×
-            </button>
-          )}
-        </div>
-      </div>
+      <AnnouncementBar controller={controller} />
     </div>
   );
 }
