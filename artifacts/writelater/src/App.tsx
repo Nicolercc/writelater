@@ -130,7 +130,7 @@ function AppContent({ demo }: { demo: boolean }) {
 }
 
 function App() {
-  const demo = useMemo(isDemoMode, []);
+  const demo = useMemo(() => isDemoMode(), []);
   return (
     // reducedMotion="user" turns off framer-motion transforms when the system
     // Reduce Motion setting is on.
